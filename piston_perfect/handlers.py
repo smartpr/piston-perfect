@@ -81,7 +81,7 @@ class BaseHandler(handler.BaseHandler):
 	Can be interpreted as a specification of which CRUD operations are
 	supported. Should be an iterable of HTTP verb names (like ``('POST',
 	'GET')``). Can be defined as (but not set to) ``True`` if we want its
-	value to be auto-generated based on	the values of :meth:`.create`,
+	value to be auto-generated based on the values of :meth:`.create`,
 	:meth:`.read`, :meth:`.update` and :meth:`.delete`, which is the default
 	behavior.
 	"""
@@ -196,6 +196,26 @@ class BaseHandler(handler.BaseHandler):
 					return False
 		return True
 	
+	def validate(self, request, current=None):
+		"""
+		Uses :attr:`form` to validate and clean incoming data
+		(*request.data*). Raises a :exc:`piston.utils.FormValidationError` in
+		case of failure. *current*, if given, is the data item that
+		*request.data* intends to update. It is not used by this
+		implementation but can be useful in subclasses that override this
+		method (such as :meth:`ModelHandler.validate`).
+		"""
+		
+		# We only know how to deal with instances of *forms.Form*.
+		if not forms.Form in getattr(self.form, '__mro__', ()):
+			return
+		
+		form = self.form(request.data)
+		if not form.is_valid():
+			raise FormValidationError(form)
+		
+		request.data = form.cleaned_data
+	
 	def data(self, request, *args, **kwargs):
 		data = self.data_list(request, *args, **kwargs)
 		if data is None:
@@ -223,15 +243,6 @@ class BaseHandler(handler.BaseHandler):
 	slice_data = None
 	
 	
-	
-	def validate(self, request, current=None):
-		if forms.Form not in getattr(self.form, '__mro__', ()):
-			return
-		
-		form = self.form(request.data)
-		if not form.is_valid():
-			raise FormValidationError(form)
-		request.data = form.cleaned_data
 	
 	def do_filter_data(self, response, request, *args, **kwargs):
 		return response
@@ -359,12 +370,21 @@ class ModelHandler(BaseHandler):
 	"""
 	
 	def validate(self, request, current=None):
-		if forms.ModelForm not in getattr(self.form, '__mro__', ()):
+		"""
+		Overrides :meth:`BaseHandler.validate` to take advantage of the fact
+		that there is a good chance that :attr:`~BaseHandler.form` is of type
+		:class:`django.forms.ModelForm`. We can work with model objects
+		instead of plain data; the resulting value in *request.data* is a
+		model instance that can safely be saved to database.
+		"""
+		
+		if not forms.ModelForm in getattr(self.form, '__mro__', ()):
 			return super(ModelHandler, self).validate(request, current)
 		
 		form = self.form(request.data, instance=current)
 		if not form.is_valid():
 			raise FormValidationError(form)
+		
 		request.data = form.save(commit=False)
 	
 	

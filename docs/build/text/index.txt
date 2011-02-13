@@ -27,8 +27,8 @@ class class piston_perfect.handlers.BaseHandler
       CRUD operations are supported. Should be an iterable of HTTP
       verb names (like ``('POST', 'GET')``). Can be defined as (but
       not set to) ``True`` if we want its value to be auto-generated
-      based on     the values of ``create()``, ``read()``,
-      ``update()`` and ``delete()``, which is the default behavior.
+      based on the values of ``create()``, ``read()``, ``update()``
+      and ``delete()``, which is the default behavior.
 
    authentication
 
@@ -114,6 +114,15 @@ class class piston_perfect.handlers.BaseHandler
       multiple times: ``?field=id&field=name`` is interpreted as the
       selection ``('id', 'name')``.
 
+   validate(request, current=None)
+
+      Uses ``form`` to validate and clean incoming data
+      (*request.data*). Raises a ``piston.utils.FormValidationError``
+      in case of failure. *current*, if given, is the data item that
+      *request.data* intends to update. It is not used by this
+      implementation but can be useful in subclasses that override
+      this method (such as ``ModelHandler.validate()``).
+
 class class piston_perfect.handlers.BaseHandlerMeta
 
    Allows a handler class definition to be different from a handler
@@ -145,6 +154,14 @@ class class piston_perfect.handlers.ModelHandler
    exclude_save
 
       A list of field names that
+
+   validate(request, current=None)
+
+      Overrides ``BaseHandler.validate()`` to take advantage of the
+      fact that there is a good chance that ``form`` is of type
+      ``django.forms.ModelForm``. We can work with model objects
+      instead of plain data; the resulting value in *request.data* is
+      a model instance that can safely be saved to database.
 
 
 ``authentication``

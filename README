@@ -1,1 +1,214 @@
-docs/build/text/index.txt
+
+piston-perfect
+**************
+
+Django Piston on steroids. Lives in a module named ``piston_perfect``
+that functions as a layer on top of ``piston``.
+
+The contents of this module are modeled after the contents of
+``piston`` (save for some subtle changes in naming).
+
+
+``handlers``
+============
+
+Generic handlers.
+
+class class piston_perfect.handlers.BaseHandler
+
+   All handlers should (directly or indirectly) inherit from this one.
+   Its public attributes and methods were devised with extensibility
+   in mind, so don't hesitate to override.
+
+   allowed_methods
+
+      Defines which HTTP methods will be allowed to run (parts of)
+      this handler. Can be interpreted as a specification of which
+      CRUD operations are supported. Should be an iterable of HTTP
+      verb names (like ``('POST', 'GET')``). Can be defined as (but
+      not set to) ``True`` if we want its value to be auto-generated
+      based on the values of ``create()``, ``read()``, ``update()``
+      and ``delete()``, which is the default behavior.
+
+   authentication
+
+      The Piston authenticator that should be in effect on this
+      handler. If defined as ``True`` (which is not the same as
+      assigning ``True``, as this will not work) an instance of
+      ``authentication.Authentication`` is used. A value of ``None``
+      implies no authentication, which is the default.
+
+   create(request, *args, **kwargs)
+
+      Overridable implementation of CRUD's Create.
+
+   exclude
+
+      Is used by ``is_field_allowed()`` to decide if a field should be
+      included in the result. Note that this only applies to scenarios
+      in which ``fields`` is empty. Should be and iterable of field
+      names and/or regular expression patterns. Its default setting is
+      to exclude all field names that begin with ``_``.
+
+   fields
+
+      Specifies the fields that are allowed to be included in a
+      response. It also serves as the set of options for request-level
+      fields selection (see ``request_fields``). If it is an empty
+      iterable (the default) the decision whether or not a field is
+      allowed to be included is taken by ``is_field_allowed()``.
+
+      Note that the value of this attribute is not automatically used
+      as field definition on the emitter, as is the behavior of
+      Piston's default base handler. See ``JsonEmitter.render()`` for
+      more information.
+
+   form
+
+      A form class of type ``django.forms.Form`` that is used to
+      validate and clean incoming data (in case of a ``POST`` or
+      ``PUT``). Can be ``None`` (the default) in which case data is
+      always accepted as is.
+
+      An alternative means to the same end is to inline the form
+      definition, in which case the name should be capitalized. As
+      such:
+
+         class MyHandler(piston_perfect.handlers.BaseHandler):
+
+             class Form(django.forms.Form):
+                 myfield = django.forms.CharField()
+                 def clean(self):
+                     return self.cleaned_data
+
+             # The rest of the handler's definition...
+
+      Note that it is possible to use this attribute with other (non-
+      Django) form or validator types, but that ``validate()`` should
+      be overridden to deal with them.
+
+   get_requested_fields(request)
+
+      Returns the fields selection for this specific request. Takes
+      into account the settings for ``fields`` and ``request_fields``,
+      and the query string in *request*. Returns ``()`` in case no
+      selection has been specified in any way.
+
+   is_field_allowed(field)
+
+      Determines if the field named *field* should be included in the
+      response. Returns ``False`` for any field that matches the
+      specification in ``exclude``, ``True`` otherwise. Note that this
+      method will not be consulted if ``fields`` is non-empty.
+
+   request_fields
+
+      Determines if request-level fields selection is enabled. Should
+      be the name of the query string parameter in which the selection
+      can be found. If this attribute is defined as ``True`` (which is
+      the default) the default parameter name ``field`` will be used.
+      Note that setting to (as opposed to "defining as") ``True`` will
+      not work.
+
+      Multiple fields can be specified by including the parameter
+      multiple times: ``?field=id&field=name`` is interpreted as the
+      selection ``('id', 'name')``.
+
+   validate(request, current=None)
+
+      Uses ``form`` to validate and clean incoming data
+      (*request.data*). Raises a ``piston.utils.FormValidationError``
+      in case of failure. *current*, if given, is the data item that
+      *request.data* intends to update. It is not used by this
+      implementation but can be useful in subclasses that override
+      this method (such as ``ModelHandler.validate()``).
+
+class class piston_perfect.handlers.BaseHandlerMeta
+
+   Allows a handler class definition to be different from a handler
+   class type. This is useful because it enables us to set attributes
+   to default values without requiring an explicit value in their
+   definition. See for example ``BaseHandler.allowed_methods``.
+
+   Note that this inherits from ``piston.handler.HandlerMetaClass``,
+   which deals with some model related stuff. This is not a problem
+   for non-model handlers as long as they do not have a ``model``
+   attribute (which ``BaseHandler`` doesn't).
+
+class class piston_perfect.handlers.ModelHandler
+
+   Provides off-the-shelf CRUD operations on data of a certain model
+   type.
+
+   Note that in order to prevent accidental exposure of data that was
+   never intended to be public, model data fields will not be included
+   in the response if they are not explicitly mentioned in ``fields``.
+   If it is empty model data will be represented in a generic way:
+   key, type and description.
+
+   exclude_nested
+
+      A list of field names that should be excluded from the field
+      selection in
+
+   exclude_save
+
+      A list of field names that
+
+   validate(request, current=None)
+
+      Overrides ``BaseHandler.validate()`` to take advantage of the
+      fact that there is a good chance that ``form`` is of type
+      ``django.forms.ModelForm``. We can work with model objects
+      instead of plain data; the resulting value in *request.data* is
+      a model instance that can safely be saved to database.
+
+
+``authentication``
+==================
+
+class class piston_perfect.authentication.Authentication
+
+   Piston authenticator that blocks all requests with non-
+   authenticated sessions.
+
+
+``resource``
+============
+
+class class piston_perfect.resource.Resource(handler, authentication=None)
+
+   Simple subclass of Piston's implementation.
+
+   form_validation_response(error)
+
+      If an handler form does not validate, this method will construct
+      an error response containing details on why the validation
+      failed. This information is represented in the format that was
+      specified in the request (or in the default emitter format in
+      case none was given).
+
+
+``patches``
+===========
+
+Custom Piston emitters.
+
+We need a few real hacks into Piston's internal logic, all of which
+originate here. "Real hacks" as in; extensions that are kind of like
+black magic because they require detailed knowledge of Piston's
+workings at code level. They depend on some very specific pieces of
+Piston code and are therefore likely to break with future versions of
+Piston.
+
+The idea is to have all the messy stuff collected in this one module
+and isolate it as much as possible from the public-facing interfaces
+in ``handlers``. Hopefully this will allow us to deal with Piston
+updates without touching anything beyond this module.
+
+class class piston_perfect.patches.JsonEmitter(*args, **kwargs)
+
+   JSON emitter. We cannot simply use Piston's implementation because
+   emitters are the only object type for which a new instance is
+   created at every HTTP request. We need it to hook in some request-
+   level Piston tweaks.
