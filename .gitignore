@@ -1,0 +1,10 @@
+.DS_Store
+*.egg-info
+*.tmproj
+*.swp
+*.pyc
+*.pyf
+*.pycf
+*.pyo
+*.orig
+docs/build/doctrees/*
