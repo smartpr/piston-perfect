@@ -8,6 +8,20 @@ that functions as a layer on top of ``piston``.
 The contents of this module are modeled after the contents of
 ``piston`` (save for some subtle changes in naming).
 
+Make sure to put the following settings in your Django settings
+module:
+
+   PISTON_IGNORE_DUPE_MODELS = True
+   PISTON_FORMATS = 'json',    # Replace with your formats of choice.
+
+Note: The first is an obscure Piston setting that is required to prevent
+  the warning in ``piston.handler.HandlerMetaClass``, which also
+  crashes if the model that it is trying to put into the *typemapper*
+  is ``None``. This in turn is necessary to prevent the custom handler
+  types that are created in
+  ``piston.emitters.Emitter.in_typemapper()`` from being registered in
+  (and messing up) the typemapper.
+
 
 ``handlers``
 ============
@@ -20,15 +34,9 @@ class class piston_perfect.handlers.BaseHandler
    Its public attributes and methods were devised with extensibility
    in mind, so don't hesitate to override.
 
-   allowed_methods
-
-      Defines which HTTP methods will be allowed to run (parts of)
-      this handler. Can be interpreted as a specification of which
-      CRUD operations are supported. Should be an iterable of HTTP
-      verb names (like ``('POST', 'GET')``). Can be defined as (but
-      not set to) ``True`` if we want its value to be auto-generated
-      based on the values of ``create()``, ``read()``, ``update()``
-      and ``delete()``, which is the default behavior.
+   Note: Piston's ``piston.handler.BaseHandler.allowed_methods`` attribute
+     should not be used, as it is auto-generated based on the values
+     of ``create``, ``read``, ``update`` and ``delete``.
 
    authentication
 
@@ -38,9 +46,17 @@ class class piston_perfect.handlers.BaseHandler
       ``authentication.Authentication`` is used. A value of ``None``
       implies no authentication, which is the default.
 
-   create(request, *args, **kwargs)
+   data(request, *args, **kwargs)
 
-      Overridable implementation of CRUD's Create.
+      Returns the data structure that is being worked on.
+
+   data_item(request, *args, **kwargs)
+
+      Returns the data item that is being worked on.
+
+   data_set(request, *args, **kwargs)
+
+      Returns the data set that is being worked on.
 
    exclude
 
@@ -60,8 +76,14 @@ class class piston_perfect.handlers.BaseHandler
 
       Note that the value of this attribute is not automatically used
       as field definition on the emitter, as is the behavior of
-      Piston's default base handler. See ``JsonEmitter.render()`` for
-      more information.
+      Piston's default base handler. See the monkey-patched
+      ``piston.emitters.Emitter.construct()`` in ``patches`` for more
+      information.
+
+   filter_data
+
+      Filter data query string parameter, or ``True`` if the default
+      (``filter``) should be used. Disabled by default.
 
    form
 
@@ -94,12 +116,21 @@ class class piston_perfect.handlers.BaseHandler
       and the query string in *request*. Returns ``()`` in case no
       selection has been specified in any way.
 
+   get_response_data(request, response)
+
+      Reads the data from a response structure.
+
    is_field_allowed(field)
 
       Determines if the field named *field* should be included in the
       response. Returns ``False`` for any field that matches the
       specification in ``exclude``, ``True`` otherwise. Note that this
       method will not be consulted if ``fields`` is non-empty.
+
+   order_data
+
+      Order data query string parameter, or ``True`` if the default
+      (``order``) should be used. Disabled by default.
 
    request_fields
 
@@ -108,32 +139,42 @@ class class piston_perfect.handlers.BaseHandler
       can be found. If this attribute is defined as ``True`` (which is
       the default) the default parameter name ``field`` will be used.
       Note that setting to (as opposed to "defining as") ``True`` will
-      not work.
+      not work. Disable request-level fields selection by setting this
+      to ``False``.
 
       Multiple fields can be specified by including the parameter
       multiple times: ``?field=id&field=name`` is interpreted as the
       selection ``('id', 'name')``.
+
+   set_response_data(request, data, response=None)
+
+      Sets data onto a response structure. Creates a new response
+      structure if none is provided.
+
+   slice_data
+
+      Slice data query string parameter, or ``True`` if the default
+      (``slice``) should be used. Disabled by default.
 
    validate(request, current=None)
 
       Uses ``form`` to validate and clean incoming data
       (*request.data*). Raises a ``piston.utils.FormValidationError``
       in case of failure. *current*, if given, is the data item that
-      *request.data* intends to update. It is not used by this
-      implementation but can be useful in subclasses that override
-      this method (such as ``ModelHandler.validate()``).
+      *request.data* intends to update.
 
 class class piston_perfect.handlers.BaseHandlerMeta
 
    Allows a handler class definition to be different from a handler
    class type. This is useful because it enables us to set attributes
    to default values without requiring an explicit value in their
-   definition. See for example ``BaseHandler.allowed_methods``.
+   definition. See for example ``BaseHandler.request_fields``.
 
    Note that this inherits from ``piston.handler.HandlerMetaClass``,
    which deals with some model related stuff. This is not a problem
    for non-model handlers as long as they do not have a ``model``
-   attribute (which ``BaseHandler`` doesn't).
+   attribute with a value other than ``None`` (which ``BaseHandler``
+   doesn't).
 
 class class piston_perfect.handlers.ModelHandler
 
@@ -148,12 +189,14 @@ class class piston_perfect.handlers.ModelHandler
 
    exclude_nested
 
-      A list of field names that should be excluded from the field
-      selection in
+      A list of field names that should be excluded from the fields
+      selection in case of a nested representation; i.e. when the
+      model is contained by another model object.
 
    exclude_save
 
-      A list of field names that
+      A list of field names that should be excluded from the auto-
+      generated form (see ``ModelHandlerMeta``).
 
    validate(request, current=None)
 
@@ -162,6 +205,11 @@ class class piston_perfect.handlers.ModelHandler
       ``django.forms.ModelForm``. We can work with model objects
       instead of plain data; the resulting value in *request.data* is
       a model instance that can safely be saved to database.
+
+class class piston_perfect.handlers.ModelHandlerMeta
+
+   Auto-generates a ``django.forms.ModelForm`` subtype based on
+   ``ModelHandler.model``.
 
 
 ``authentication``
@@ -180,6 +228,12 @@ class class piston_perfect.resource.Resource(handler, authentication=None)
 
    Simple subclass of Piston's implementation.
 
+   callmap
+
+      Just some crazy Python fun way to say:
+
+         dict(POST='POST', GET='GET', ... )
+
    form_validation_response(error)
 
       If an handler form does not validate, this method will construct
@@ -191,8 +245,6 @@ class class piston_perfect.resource.Resource(handler, authentication=None)
 
 ``patches``
 ===========
-
-Custom Piston emitters.
 
 We need a few real hacks into Piston's internal logic, all of which
 originate here. "Real hacks" as in; extensions that are kind of like
@@ -206,9 +258,46 @@ and isolate it as much as possible from the public-facing interfaces
 in ``handlers``. Hopefully this will allow us to deal with Piston
 updates without touching anything beyond this module.
 
-class class piston_perfect.patches.JsonEmitter(*args, **kwargs)
+piston_perfect.patches.construct(self)
 
-   JSON emitter. We cannot simply use Piston's implementation because
-   emitters are the only object type for which a new instance is
-   created at every HTTP request. We need it to hook in some request-
-   level Piston tweaks.
+   Allows for some stuff to be done right before and right after the
+   response is being constructed by the emitter:
+
+   * fields selection is taken care of right before construction;
+
+   * a post-construction hook is invoked right after construction in
+     order to give the handler the opportunity to make some last-
+     minute modifications or to perform operations that modify the
+     (unconstructed) data (like removing the data from database).
+
+piston_perfect.patches.in_typemapper(self, *args, **kwargs)
+
+   Is called by ``piston.emitters.Emitter.construct()`` when it
+   encounters model data and no fields specification is readily
+   available (in ``piston.emitters.Emitter.fields``). This can be the
+   case in two scenarios:
+
+   1. the model data is nested, i.e. referred to by another model
+      instance;
+
+   2. the current handler is not a model handler.
+
+   This monkey-patch is needed to be able to alter Piston's default
+   behavior for these scenarios:
+
+   1. replace the model type handler's fields specification with a
+      nested data specification (see
+      ``handlers.ModelHandler.exclude_nested``), or with the handler's
+      fallback model representation
+      (``handlers.BaseHandler.model_fields``);
+
+   2. prevent Piston from trying to introspect all the fields in the
+      model data (which is risky because it might very well result in
+      a huge chunk of uncurated data ending up in the response) by
+      putting the handler's fallback model representation in place.
+
+piston_perfect.patches.register(cls, name, klass, content_type='text/plain')
+
+   We need to monkey-patch this method in order to be able to monkey-
+   patch ``piston.emitters.Emitter.render()``, as the latter has got
+   no implementation and is not being invoked by its inheritors.

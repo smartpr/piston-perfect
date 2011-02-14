@@ -2,16 +2,13 @@
 Generic handlers.
 """
 
-
 import re
 from django import forms
-from django.core.exceptions import FieldError, MultipleObjectsReturned
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models, connection
-from django.db.models import Q
-from django.db.models.query import QuerySet
-from django.http import HttpResponse, HttpResponseForbidden, HttpResponseNotAllowed, HttpResponseGone
+from django.http import HttpResponseGone
 from django.conf import settings
-from piston import handler, resource, emitters
+from piston import handler, resource
 from piston.utils import FormValidationError
 from .authentication import Authentication
 from .resource import Resource
@@ -22,31 +19,42 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 	Allows a handler class definition to be different from a handler class
 	type. This is useful because it enables us to set attributes to default
 	values without requiring an explicit value in their definition. See for
-	example :attr:`BaseHandler.allowed_methods`.
+	example :attr:`BaseHandler.request_fields`.
 	
 	Note that this inherits from :mod:`piston.handler.HandlerMetaClass`, which
 	deals with some model related stuff. This is not a problem for non-model
-	handlers as long as they do not have a ``model`` attribute (which
-	:class:`BaseHandler` doesn't).
+	handlers as long as they do not have a ``model`` attribute with a value
+	other than ``None`` (which :class:`BaseHandler` doesn't).
 	"""
 	
 	def __new__(meta, name, bases, attrs):
 		
+		# An inline form definition should never end up on the resulting type
+		# as is, but should be assigned to the *form* attribute instead.
 		inline_form = attrs.pop('Form', None)
 		
 		cls = super(BaseHandlerMeta, meta).__new__(meta, name, bases, attrs)
 		
+		# We always auto-generate (and thus overwrite) *allowed_methods*
+		# because the definition of which methods are allowed is now done via
+		# *create*, *read*, *update* and *delete* and *allowed_methods* should
+		# therefore always reflect their settings.
+		cls.allowed_methods = []
+		for method, operation in resource.Resource.callmap.iteritems():
+			if getattr(cls, operation) is True:
+				setattr(cls, operation, getattr(cls, "_%s" % operation))
+			if callable(getattr(cls, operation)):
+				cls.allowed_methods.append(method)
+		cls.allowed_methods = tuple(cls.allowed_methods)
+		
 		# The general idea is that an attribute with value ``True`` indicates
 		# that we want to enable it with its default value.
-		
-		if cls.allowed_methods is True:
-			cls.allowed_methods = [method
-				for method, operation in resource.Resource.callmap.iteritems()
-				if getattr(cls, operation, False)]
 		
 		if cls.request_fields is True:
 			cls.request_fields = 'field'
 		
+		# An inline form always presides over any existing or directly
+		# assigned values.
 		if inline_form:
 			cls.form = inline_form
 		
@@ -54,7 +62,7 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 			cls.order_data = 'order'
 		
 		if cls.slice_data is True:
-			cls.slice_data = 'offset', 'limit'
+			cls.slice_data = 'slice'
 		
 		# Changing this attribute at run-time won't work, but removing the
 		# attribute for that reason is not a good idea, as that would render
@@ -71,20 +79,15 @@ class BaseHandler(handler.BaseHandler):
 	All handlers should (directly or indirectly) inherit from this one. Its
 	public attributes and methods were devised with extensibility in mind, so
 	don't hesitate to override.
+	
+	.. note::
+	   Piston's :attr:`piston.handler.BaseHandler.allowed_methods` attribute
+	   should not be used, as it is auto-generated based on the values of
+	   :attr:`.create`, :attr:`.read`, :attr:`.update` and :attr:`.delete`.
 	"""
 	
 	__metaclass__ = BaseHandlerMeta
 	
-	allowed_methods = True
-	"""
-	Defines which HTTP methods will be allowed to run (parts of) this handler.
-	Can be interpreted as a specification of which CRUD operations are
-	supported. Should be an iterable of HTTP verb names (like ``('POST',
-	'GET')``). Can be defined as (but not set to) ``True`` if we want its
-	value to be auto-generated based on the values of :meth:`.create`,
-	:meth:`.read`, :meth:`.update` and :meth:`.delete`, which is the default
-	behavior.
-	"""
 	
 	fields = ()
 	"""
@@ -96,7 +99,8 @@ class BaseHandler(handler.BaseHandler):
 	
 	Note that the value of this attribute is not automatically used as field
 	definition on the emitter, as is the behavior of Piston's default base
-	handler. See :meth:`JsonEmitter.render` for more information.
+	handler. See the monkey-patched :meth:`piston.emitters.Emitter.construct`
+	in :mod:`.patches` for more information.
 	"""
 	
 	request_fields = True
@@ -105,7 +109,8 @@ class BaseHandler(handler.BaseHandler):
 	name of the query string parameter in which the selection can be found.
 	If this attribute is defined as ``True`` (which is the default) the
 	default parameter name ``field`` will be used. Note that setting to (as
-	opposed to "defining as") ``True`` will not work.
+	opposed to "defining as") ``True`` will not work. Disable request-level
+	fields selection by setting this to ``False``.
 	
 	Multiple fields can be specified by including the parameter multiple
 	times: ``?field=id&field=name`` is interpreted as the selection ``('id',
@@ -119,37 +124,6 @@ class BaseHandler(handler.BaseHandler):
 	:attr:`fields` is empty. Should be and iterable of field names and/or
 	regular expression patterns. Its default setting is to exclude all field
 	names that begin with ``_``.
-	"""
-	
-	authentication = None
-	"""
-	The Piston authenticator that should be in effect on this handler. If
-	defined as ``True`` (which is not the same as assigning ``True``, as this
-	will not work) an instance of :class:`.authentication.Authentication` is
-	used. A value of ``None`` implies no authentication, which is the default.
-	"""
-	
-	form = None
-	"""
-	A form class of type :class:`django.forms.Form` that is used to validate
-	and clean incoming data (in case of a ``POST`` or ``PUT``). Can be
-	``None`` (the default) in which case data is always accepted as is.
-	
-	An alternative means to the same end is to inline the form definition, in
-	which case the name should be capitalized. As such::
-	
-	  class MyHandler(piston_perfect.handlers.BaseHandler):
-	      
-	      class Form(django.forms.Form):
-	          myfield = django.forms.CharField()
-	          def clean(self):
-	              return self.cleaned_data
-	  
-	      # The rest of the handler's definition...
-	
-	Note that it is possible to use this attribute with other (non-Django)
-	form or validator types, but that :meth:`.validate` should be overridden
-	to deal with them.
 	"""
 	
 	def get_requested_fields(self, request):
@@ -196,19 +170,70 @@ class BaseHandler(handler.BaseHandler):
 					return False
 		return True
 	
+	
+	model_fields = 'model_key', 'model_type', 'model_description'
+	
+	@classmethod
+	def model_key(cls, model_instance):
+		return model_instance.pk
+	
+	@classmethod
+	def model_type(cls, model_instance):
+		return model_instance._meta.verbose_name
+	
+	@classmethod
+	def model_description(cls, model_instance):
+		return unicode(model_instance)
+	
+	
+	authentication = None
+	"""
+	The Piston authenticator that should be in effect on this handler. If
+	defined as ``True`` (which is not the same as assigning ``True``, as this
+	will not work) an instance of :class:`.authentication.Authentication` is
+	used. A value of ``None`` implies no authentication, which is the default.
+	"""
+	
+	
+	form = None
+	"""
+	A form class of type :class:`django.forms.Form` that is used to validate
+	and clean incoming data (in case of a ``POST`` or ``PUT``). Can be
+	``None`` (the default) in which case data is always accepted as is.
+	
+	An alternative means to the same end is to inline the form definition, in
+	which case the name should be capitalized. As such::
+	
+	  class MyHandler(piston_perfect.handlers.BaseHandler):
+	      
+	      class Form(django.forms.Form):
+	          myfield = django.forms.CharField()
+	          def clean(self):
+	              return self.cleaned_data
+	  
+	      # The rest of the handler's definition...
+	
+	Note that it is possible to use this attribute with other (non-Django)
+	form or validator types, but that :meth:`.validate` should be overridden
+	to deal with them.
+	"""
+	
 	def validate(self, request, current=None):
 		"""
 		Uses :attr:`form` to validate and clean incoming data
 		(*request.data*). Raises a :exc:`piston.utils.FormValidationError` in
 		case of failure. *current*, if given, is the data item that
-		*request.data* intends to update. It is not used by this
-		implementation but can be useful in subclasses that override this
-		method (such as :meth:`ModelHandler.validate`).
+		*request.data* intends to update.
 		"""
 		
 		# We only know how to deal with instances of *forms.Form*.
 		if not forms.Form in getattr(self.form, '__mro__', ()):
 			return
+		
+		# TODO: we could parameterize this behavior.
+		if current:
+			# Allow for updates using partial data objects.
+			request.data.update(current)
 		
 		form = self.form(request.data)
 		if not form.is_valid():
@@ -216,130 +241,243 @@ class BaseHandler(handler.BaseHandler):
 		
 		request.data = form.cleaned_data
 	
+	
 	def data(self, request, *args, **kwargs):
-		data = self.data_list(request, *args, **kwargs)
+		"""
+		Returns the data structure that is being worked on.
+		"""
+		data = self.data_set(request, *args, **kwargs)
 		if data is None:
 			data = self.data_item(request, *args, **kwargs)
 		return data
 	
-	def data_list(self, request, *args, **kwargs):
+	def data_set(self, request, *args, **kwargs):
+		"""
+		Returns the data set that is being worked on.
+		"""
 		return None
 	
 	def data_item(self, request, *args, **kwargs):
+		"""
+		Returns the data item that is being worked on.
+		"""
 		return HttpResponseGone()
 	
+	# The *request* parameter in the following methods can be used to
+	# construct responses that are structured differently for different types
+	# of requests.
+	
+	# TODO: Deal with scenario in which response is a HttpResponse.
+	
 	def get_response_data(self, request, response):
+		"""
+		Reads the data from a response structure.
+		"""
 		return response.get('data')
 	
-	def set_response_data(self, request, response, data):
+	def set_response_data(self, request, data, response=None):
+		"""
+		Sets data onto a response structure. Creates a new response structure
+		if none is provided.
+		"""
+		if response is None:
+			response = {}
 		response['data'] = data
 		return response
 	
 	
+	filter_data = False
+	"""
+	Filter data query string parameter, or ``True`` if the default
+	(``filter``) should be used. Disabled by default.
+	"""
 	
-	
-	filter_data = {}
-	order_data = None
-	slice_data = None
-	
-	
-	
-	def do_filter_data(self, response, request, *args, **kwargs):
-		return response
-	
-	def do_order_data(self, response, request, *args, **kwargs):
-		return response
-	
-	def do_slice_data(self, response, request, *args, **kwargs):
-		if not self.slice_data or not self.slice_data[0] in request.GET and not self.slice_data[1] in request.GET:
+	def response_filter_data(self, response, request, *args, **kwargs):
+		filters = self.filter_data or {}
+		
+		if not filters:
 			return response
 		
-		data = response.get('data')
-		start = int(request.GET.get(self.slice_data[0], 0))
-		stop = start + int(request.GET.get(self.slice_data[1], 0))
-		if stop == start:
-			stop = None
-		try:
-			sliced = data[start:stop]
-			# TODO: only set if not exists yet
+		data = self.get_response_data(request, response)
+		
+		for definition, fields in filters.iteritems():
+			queries = request.GET.getlist(definition)
+			if queries:
+				data = self.process_filter_data(data, queries, fields)
+		
+		self.set_response_data(request, data, response)
+		return True
+	
+	def process_filter_data(self, data, queries, fields):
+		raise NotImplementedError
+	
+	
+	order_data = False
+	"""
+	Order data query string parameter, or ``True`` if the default (``order``)
+	should be used. Disabled by default.
+	"""
+	
+	def response_order_data(self, response, request, *args, **kwargs):
+		order = request.GET.getlist(self.order_data)
+		
+		if not order:
+			return False
+		
+		self.set_response_data(request,
+			self.process_order_data(
+				self.get_response_data(request, response),
+				*order
+			),
+			response,
+		)
+		return True
+	
+	def process_order_data(self, data, *order):
+		raise NotImplementedError
+	
+	
+	slice_data = False
+	"""
+	Slice data query string parameter, or ``True`` if the default (``slice``)
+	should be used. Disabled by default.
+	"""
+	
+	def response_slice_data(self, response, request, *args, **kwargs):
+		slice = request.GET.get(self.slice_data, None)
+		
+		if not slice:
+			return False
+		
+		data = self.get_response_data(request, response)
+		
+		# Allow this to be preempted by other methods, which may be useful (or
+		# necessary) in case of big lazy loading data sets.
+		if not 'total' in response:
 			response['total'] = len(data)
-			data = sliced
+		
+		slice = slice.split(':')
+		
+		process = []
+		for i in range(3):
+			try:
+				slice_arg = slice[i]
+			except IndexError:
+				slice_arg = None
+			try:
+				# A slice argument is usually a number...
+				process.append(int(slice_arg))
+			except:
+				# ... but don't choke if it's not.
+				process.append(slice_arg or None)
+		
+		self.set_response_data(request,
+			self.process_slice_data(data, *process),
+			response,
+		)
+		return True
+	
+	def process_slice_data(self, data, start=None, stop=None, step=None):
+		try:
+			return data[start:stop:step]
 		except:
-			pass
-		response['data'] = data
-		return response
+			# Allows us to run *response_slice_data* without having to worry
+			# about if the data is actually sliceable.
+			return data
+	
 	
 	def POST(self, request, *args, **kwargs):
 		self.validate(request)
-		return dict(data=self.create(request, *args, **kwargs))
+		return self.set_response_data(request, self.create(request, *args, **kwargs))
 	
 	def GET(self, request, *args, **kwargs):
-		response = dict(data=self.read(request, *args, **kwargs))
-		response = self.do_filter_data(response, request, *args, **kwargs)
-		response = self.do_order_data(response, request, *args, **kwargs)
-		response = self.do_slice_data(response, request, *args, **kwargs)
-		# response = self.filter_fields(response, self.get_requested_fields(request))
+		
+		# We can simply assume that :attr:`read` is callable here, as we have
+		# defined :attr:`allowed_methods` based on the callability of the CRUD
+		# operator methods.
+		response = self.set_response_data(request, self.read(request, *args, **kwargs))
+		
+		self.response_filter_data(response, request, *args, **kwargs)
+		self.response_order_data(response, request, *args, **kwargs)
+		self.response_slice_data(response, request, *args, **kwargs)
+		
 		return response
 	
 	def PUT(self, request, *args, **kwargs):
 		self.validate(request, current=self.data_item(request, *args, **kwargs))
-		return dict(data=self.update(request, *args, **kwargs))
+		return self.set_response_data(request, self.update(request, *args, **kwargs))
 	
 	def DELETE(self, request, *args, **kwargs):
-		response = dict(data=self.delete(request, *args, **kwargs))
-		response = self.do_filter_data(response, request, *args, **kwargs)
-		response = self.do_order_data(response, request, *args, **kwargs)
-		response = self.do_slice_data(response, request, *args, **kwargs)
-		# response = self.filter_fields(response, self.get_requested_fields(request))
+		
+		response = self.set_response_data(request, self.delete(request, *args, **kwargs))
+		
+		self.response_filter_data(response, request, *args, **kwargs)
+		self.response_order_data(response, request, *args, **kwargs)
+		self.response_slice_data(response, request, *args, **kwargs)
+		
 		return response
 	
-	def create(self, request, *args, **kwargs):
+	
+	create = False
+	def _create(self, request, *args, **kwargs):
 		"""
-		Overridable implementation of CRUD's Create.
+		Implementation that is used for :attr:`create` if it is defined as
+		``True``.
 		"""
 		return request.data
 	
-	def read(self, request, *args, **kwargs):
+	read = False
+	def _read(self, request, *args, **kwargs):
 		return self.data(request, *args, **kwargs)
 	
-	def update(self, request, *args, **kwargs):
+	update = False
+	def _update(self, request, *args, **kwargs):
 		return request.data
 	
-	def delete(self, request, *args, **kwargs):
+	delete = False
+	def _delete(self, request, *args, **kwargs):
 		return self.data(request, *args, **kwargs)
 	
-	def post_construct(self, request, unconstructed, constructed):
-		# TODO: Make this an overridable piece of logic (like the others).
+	
+	def response_add_debug(self, response, request):
+		# Unfortunately we lost *args*/*kwargs* in *response_constructed*.
+		response['debug'] = dict(
+			query_log=connection.queries,
+			query_count=len(connection.queries),
+		)
+		return response
+	
+	def response_constructed(self, response, unconstructed, request):
+		if request.method.upper() == 'DELETE':
+			self.data_safe_for_delete(self.get_response_data(request, unconstructed))
+		
 		if settings.DEBUG:
-			constructed['meta'] = dict(
-				query_log=connection.queries,
-				query_count=len(connection.queries),
-			)
-		return constructed
+			response = self.response_add_debug(response, request)
+		
+		return response
+	
+	def data_safe_for_delete(self, data):
+		pass
 
 
 class ModelHandlerMeta(BaseHandlerMeta):
+	"""
+	Auto-generates a :class:`django.forms.ModelForm` subtype based on
+	:attr:`ModelHandler.model`.
+	"""
 	
 	def __new__(meta, name, bases, attrs):
-		# TODO: Raise exception if no model type is in `attrs`.
-		# TODO: Raise exception if form in `attrs` is not of type `forms.
-		# ModelForm`?
+		# TODO: Things probably go wrong if no model type was provided. We
+		# should deal with this scenario.
+		
 		cls = super(ModelHandlerMeta, meta).__new__(meta, name, bases, attrs)
 		
-		# Do not override `cls.form` if it has a truthy value, regardless if
-		# it is an instance of `forms.Form` or not. `cls.validate()` may be
-		# overridden in order to deal with other types of forms.
-		if False and not cls.form and cls.model:
-			try:
-				class Form(forms.ModelForm):
-					class Meta:
-						model = cls.model
-						fields = cls.fields
-						exclude = cls.exclude_save
-			except FieldError:
-				# TODO: Raise an exception that makes sense in the current
-				# context.
-				raise
+		if not cls.form and cls.model:
+			class Form(forms.ModelForm):
+				class Meta:
+					model = cls.model
+					fields = tuple(set(cls.fields).intersection(cls.model._meta.get_all_field_names()))
+					exclude = cls.exclude_save
 			cls.form = Form
 		
 		return cls
@@ -357,16 +495,21 @@ class ModelHandler(BaseHandler):
 	
 	__metaclass__ = ModelHandlerMeta
 	
+	
 	model = None
 	
 	exclude_nested = ()
 	"""
-	A list of field names that should be excluded from the field selection in
+	A list of field names that should be excluded from the fields selection in
+	case of a nested representation; i.e. when the model is contained by
+	another model object.
 	"""
+	
 	
 	exclude_save = ()
 	"""
-	A list of field names that 
+	A list of field names that should be excluded from the auto-generated form
+	(see :class:`ModelHandlerMeta`).
 	"""
 	
 	def validate(self, request, current=None):
@@ -381,6 +524,12 @@ class ModelHandler(BaseHandler):
 		if not forms.ModelForm in getattr(self.form, '__mro__', ()):
 			return super(ModelHandler, self).validate(request, current)
 		
+		if current:
+			# Complement *request.data* with data from *current* in order to
+			# support updating with partial data.
+			for field in self.form.base_fields.keys():
+				request.data.setdefault(field, getattr(current, field))
+		
 		form = self.form(request.data, instance=current)
 		if not form.is_valid():
 			raise FormValidationError(form)
@@ -389,240 +538,64 @@ class ModelHandler(BaseHandler):
 	
 	
 	def data(self, request, *args, **kwargs):
-		for field, _ in kwargs.iteritems():
-			if self.model._meta.get_field(field).unique:
-				# We found a condition that is guaranteed to be unique
-				# identifier, so we can switch to singular mode -- we won't
-				# put returned data in a list for example.
-				return self.data_item(request, *args, **kwargs)
-		return self.data_list(request, *args, **kwargs)
+		for field in kwargs.keys():
+			try:
+				if self.model._meta.get_field(field).unique:
+					# We found a parameter that identifies a single item, so
+					# we assume that singular data was requested.
+					return self.data_item(request, *args, **kwargs)
+			except:
+				# No field named *field* on *self.model*.
+				pass
+		return self.data_set(request, *args, **kwargs)
 	
-	def data_list(self, request, *args, **kwargs):
+	def data_set(self, request, *args, **kwargs):
 		return self.model.objects.filter(**kwargs)
 	
 	def data_item(self, request, *args, **kwargs):
-		return self.data_list(request, *args, **kwargs).get(**kwargs)
+		try:
+			return self.data_set(request, *args, **kwargs).get(**kwargs)
+		except ObjectDoesNotExist:
+			return super(ModelHandler, self).data_item(request, *args, **kwargs)
 	
-	def data_count(self, data):
-		return data.count()
 	
-	def do_filter_data(self, response, request, *args, **kwargs):
-		data = response.get('data')
-		if not isinstance(data, QuerySet) or not self.filter_data:
-			return response
+	def process_filter_data(self, data, queries, fields):
+		query = models.Q()
 		
-		# Do away with all records that do not match the provided filter terms
-		# (if any).
-		for param, fields in self.filter_data.iteritems():
-			query = Q()
-			for term in request.GET.get(param, '').split():
-				for field in fields:
-					query |= Q(**{ '%s__icontains' % field: term })
-			data = data.filter(query)
-		response['data'] = data
-		return response
-	
-	def do_order_data(self, response, request, *args, **kwargs):
-		data = response.get('data')
-		if not isinstance(data, QuerySet) or not self.order_data:
-			return response
+		for term in ' '.join(queries).split():
+			for field in fields:
+				query |= models.Q(**{ '%s__icontains' % field: term })
 		
-		# TODO: Allow for more specifically defined ordering than is enabled
-		# by `order_by()`.
-		response['data'] = data.order_by(*request.GET.getlist(self.order_data))
-		
-		return response
+		return data.filter(query)
 	
-	def create(self, request, *args, **kwargs):
+	def process_order_data(self, data, *order):
+		return data.order_by(*order)
+	
+	def response_slice_data(self, response, request, *args, **kwargs):
+		data = self.get_response_data(request, response)
+		
+		if not isinstance(data, models.query.QuerySet):
+			return False
+		
+		response['total'] = data.count()
+		
+		sliced = super(ModelHandler, self).response_slice_data(response, request, *args, **kwargs)
+		
+		if not sliced:
+			del response['total']
+		
+		return sliced
+	
+	
+	def _create(self, request, *args, **kwargs):
 		request.data.save()
-		return super(ModelHandler, self).create(request, *args, **kwargs)
+		return super(ModelHandler, self)._create(request, *args, **kwargs)
 	
-	def update(self, request, *args, **kwargs):
+	def _update(self, request, *args, **kwargs):
 		request.data.save()
-		return super(ModelHandler, self).update(request, *args, **kwargs)
+		return super(ModelHandler, self)._update(request, *args, **kwargs)
 	
-	def post_construct(self, request, unconstructed, constructed):
-		if request.method.upper() == 'DELETE':
-			unconstructed.get('data').delete()
-		return super(ModelHandler, self).post_construct(request, unconstructed, constructed)
-
-
-
-"""
-class ModelHandlerMeta(BaseHandlerMeta):
 	
-	def __new__(meta, name, bases, attrs):
-		# TODO: Raise exception if no model type is in `attrs`.
-		# TODO: Raise exception if form in `attrs` is not of type `forms.
-		# ModelForm`?
-		if not attrs.get('form'):
-			try:
-				class Form(forms.ModelForm):
-					class Meta:
-						model = attrs.get('model')
-						fields = attrs.get('fields')
-						exclude = attrs.get('exclude_save')
-			except FieldError:
-				# TODO: Raise an exception that makes sense in the current
-				# context.
-				raise
-			attrs['form'] = Form
-		
-		cls = super(ModelHandlerMeta, meta).__new__(meta, name, bases, attrs)
-		return cls
-
-class ModelHandler(BaseHandler):
-	
-	__metaclass__ = ModelHandlerMeta
-	
-	def get_emitter_fields(self, request):
-		return self.get_requested_fields(request)
-	
-	model = None
-	
-	exclude_nested = ()
-	
-	exclude_save = ()
-	
-	def validate(self, request, *args, **kwargs):
-		super(ModelHandler, self).validate(request, *args, **kwargs)
-		instance = request.form.save(commit=False)
-		return instance
-	
-	def request(self, request, *args, **kwargs):
-		
-		response = super(ModelHandler, self).request(request, *args, **kwargs)
-		
-		# from django.db.models import Q
-		# query = Q()
-		# for term in request.GET.get('filter', '').split():
-		# 	query |= Q(**{ 'name__icontains': term })
-		# data = data.filter(query)
-		
-		return response
-	
-	def POST(self, request, *args, **kwargs):
-		
-		return super(ModelHandler, self).POST(request, *args, **kwargs)
-
-
-class BaseHandlerMeta(handler.HandlerMetaClass):
-	
-	def __new__(meta, name, bases, attrs):
-		if not 'form' in attrs:
-			if 'model' in attrs:
-				try:
-					class Form(forms.ModelForm):
-						class Meta:
-							model = attrs.get('model')
-							fields = attrs.get('fields')
-							exclude = attrs.get('exclude_save')
-				except FieldError:
-					# TODO: Raise an exception that makes sense in the current
-					# context.
-					raise
-			else:
-				class Form(forms.Form):
-					pass
-			attrs['form'] = Form
-		
-		auth = attrs.pop('authentication', None)
-		
-		cls = super(BaseHandlerMeta, meta).__new__(meta, name, bases, attrs)
-		
-		cls.resource = Resource(cls, auth)
-		
-		return cls
-
-class BaseHandler(handler.BaseHandler):
-	
-	__metaclass__ = BaseHandlerMeta
-	
-	# TODO: These are irrelevant if they don't go along with `model`. The same
-	# holds for `form`.
-	fields = ()
-	# TODO: I don't think this is actually necessary, yet we might want to
-	# keep it to increase future compatibility.
-	exclude = ()
-	exclude_nested = ()
-	exclude_save = ()
-	
-	def update_fields(self, request, fields):
-		return tuple(set(fields).intersection(request.GET.getlist('field'))) or fields
-	
-	def is_singular(self, **conditions):
-		for field, _ in conditions.iteritems():
-			if self.model._meta.get_field(field).unique:
-				# We found a condition that is guaranteed to be unique
-				# identifier, so we can switch to singular mode -- we won't
-				# put returned data in a list for example.
-				return True
-		return False
-	
-	def request(self, request, *args, **kwargs):
-		method = getattr(self, request.method.upper(), None)
-		if method is None:
-			# TODO: This is technically not correct, as `self.allowed_methods`
-			# did not lead us to this conclusion.
-			return HttpResponseNotAllowed(self.allowed_methods)
-		
-		response = method(request, *args, **kwargs)
-		
-		if isinstance(response, HttpResponse):
-			return response
-		
-		if settings.DEBUG:
-			response['debug'] = dict(
-				query_log=connection.queries,
-				query_count=len(connection.queries),
-			)
-		
-		return response
-	
-	# TODO: Can't/shouldn't we just leave out `*args` here? It would disable
-	# support for unnamed arguments in `urls.py`, but using those would
-	# probably just lead to confusing behavior anyway.
-	def POST(self, request, *args, **kwargs):
-		# If this request was issued to an URL that identifies an instance, we
-		# will not proceed with creating a new instance, as the requester
-		# probably did not intend to do that.
-		if self.is_singular(**kwargs):
-			# TODO: Use these Django classes everywhere, instead of the
-			# shabby (and probably volatile) stuff in `piston.utils.rc`? Note
-			# that Piston's source works around a bug in Django which might
-			# still be there (and would need to be worked around ourselves if
-			# we decide to no longer use Piston's responses).
-			return HttpResponseNotAllowed(set(['GET', 'PUT', 'DELETE']).intersection(self.allowed_methods))
-		
-		form = self.form(request.data)
-		if not form.is_valid():
-			raise FormValidationError(form)
-		request.form = form
-		
-		return dict(
-			# TODO: Technically, `self.create(form.save(commit=False))` would
-			# suffice.
-			# TODO: We should deal with duplicate entries. See `piston.
-			# handler.BaseHandler.create`.
-			data=self.create(request, *args, **kwargs),
-		)
-	
-	def GET(self, request, *args, **kwargs):
-		# TODO: This assumption that we can simply use *all* keyword arguments
-		# as filter conditions is way too harsh.
-		request.queryset = self.model.objects.filter(**kwargs)
-		
-		response = dict(
-			data=self.read(request, *args, **kwargs),
-		)
-		
-		if not self.is_singular(**kwargs):
-			response['total'] = response.get('data').count()
-		
-		return response
-
-
-class AuthHandler(BaseHandler):
-	
-	authentication = SessionAuthentication()
-"""
+	def data_safe_for_delete(self, data):
+		data.delete()
+		return super(ModelHandler, self).data_safe_for_delete(data)

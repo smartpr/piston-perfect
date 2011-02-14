@@ -1,6 +1,4 @@
 """
-Custom Piston emitters.
-
 We need a few real hacks into Piston's internal logic, all of which originate
 here. "Real hacks" as in; extensions that are kind of like black magic because
 they require detailed knowledge of Piston's workings at code level. They
@@ -13,133 +11,166 @@ isolate it as much as possible from the public-facing interfaces in
 without touching anything beyond this module.
 """
 
-
-from piston import emitters
-
-# This is a hack into Piston which allows us to explicitly specify the fields
-# that we want a response to contain. It works by overriding the `fields`
-# property of the emitter instance right before it is being used to construct
-# the response data.
-
-# It is assumed that a handler specifies a `fields` and/or a `list_fields`
-# property, as it is taken as an outline for the set of fields that are
-# allowed to be returned. Also, if no fields are specified on the request we
-# fall back onto the specification on the handler. The handler's `exclude`
-# property should not be used, at it is not taken into account here.
-
-# It looks like this hack is supported by Piston version `0.2.3rc1`, yet the
-# [latest revision](http://bitbucket.org/jespern/django-piston/changeset/
-# c4b2d21db51a) breaks it again. We are assuming that this is a regression
-# that will be fixed before an official release of `0.2.3rc1`. In the meantime
-# we have to work with [revision `e539a104d516`](http://bitbucket.org/jespern/
-# django-piston/src/e539a104d516/).
-
-
-# We want to make sure that we only support formats that we explicitly
-# register.
-map(emitters.Emitter.unregister, emitters.Emitter.EMITTERS.keys())
-
-
-def nested_mode(handler):
-	if handler:
-		# TODO: subclass from handler in order to not lose method fields.
-		class PseudoHandler(object):
-			fields = '_phantom',
-			exclude = handler.exclude_nested	# TODO: Concat handler.exclude(?)
-			extra_fields = handler.fields or ('model_key', 'model_type', 'model_description')	# handler in typemap, but empty fields spec
-			@classmethod
-			def model_key(cls, model_instance):
-				return model_instance.pk
-			@classmethod
-			def model_type(cls, model_instance):
-				return model_instance._meta.verbose_name
-			@classmethod
-			def model_description(cls, model_instance):
-				return unicode(model_instance)
-	else:
-		class PseudoHandler(object):
-			fields = 'model_key', 'model_type', 'model_description'		# no handler in type map for the current model type.
-			exclude = ()
-			@classmethod
-			def model_key(cls, model_instance):
-				return model_instance.pk
-			@classmethod
-			def model_type(cls, model_instance):
-				return model_instance._meta.verbose_name
-			@classmethod
-			def model_description(cls, model_instance):
-				return unicode(model_instance)
-	return PseudoHandler
-
-# # TODO: Move to emitters.
-# def apply_requested_fields(request, response):
-# 	fields = self.get_requested_fields(request)
-# 	
-# 	def recursive_apply(data):
-# 		if isinstance(data, (list, tuple, set, models.query.QuerySet)):
-# 			return map(recursive_apply, data)
-# 		
-# 		if not hasattr(data, 'items'):
-# 			return data
-# 		
-# 		return dict([(key, value)
-# 			for key, value in data.items()
-# 			if key in fields or not fields and self.allow_field(key)])
-# 	
-# 	return self.set_response_data(request, response,
-# 		recursive_apply(self.get_response_data(request, response)))
-# 
-
 from django.db import models
+from django.conf import settings
+from piston.emitters import Emitter
+from .handlers import ModelHandler
 
-class JsonEmitter(emitters.JSONEmitter):
+
+# These are all the natively supported formats, including their emitter class
+# and content type. Save for later reference.
+ALL_FORMATS = Emitter.EMITTERS.copy()
+
+# Reset registered emitters, because we want to enforce making supported
+# formats explicit. Also, we want to be able to monkey-patch
+# *Emitter.register* before the first registration is done. Because Piston's
+# emitter registrations cannot be prevented when importing *Emitter*, the only
+# way to achieve our goal is to postpone the moment of first registration.
+Emitter.EMITTERS.clear()
+
+
+# Monkey-patch *Emitter.in_typemapper*.
+
+native_in_typemapper = Emitter.in_typemapper
+
+def in_typemapper(self, *args, **kwargs):
 	"""
-	JSON emitter. We cannot simply use Piston's implementation because
-	emitters are the only object type for which a new instance is created at
-	every HTTP request. We need it to hook in some request-level Piston
-	tweaks.
+	Is called by :meth:`piston.emitters.Emitter.construct` when it encounters
+	model data and no fields specification is readily available (in
+	:attr:`piston.emitters.Emitter.fields`). This can be the case in two
+	scenarios:
+	
+	1. the model data is nested, i.e. referred to by another model instance;
+	2. the current handler is not a model handler.
+	
+	This monkey-patch is needed to be able to alter Piston's default
+	behavior for these scenarios:
+	
+	1. replace the model type handler's fields specification with a nested
+	   data specification (see :attr:`.handlers.ModelHandler.exclude_nested`),
+	   or with the handler's fallback model representation
+	   (:attr:`.handlers.BaseHandler.model_fields`);
+	2. prevent Piston from trying to introspect all the fields in the model
+	   data (which is risky because it might very well result in a huge chunk
+	   of uncurated data ending up in the response) by putting the handler's
+	   fallback model representation in place.
 	"""
 	
-	def __init__(self, *args, **kwargs):
-		# TODO: Move to handler.
-		from django.db import connection
-		# connection.queries = []
-		return super(JsonEmitter, self).__init__(*args, **kwargs)
+	# Try to find a handler for the provided model type.
+	handler = native_in_typemapper(self, *args, **kwargs)
 	
-	def construct(self):
-		constructed = self.handler.post_construct(self._request, self.data, super(JsonEmitter, self).construct())
-		del self._request
-		return constructed
+	# If we have a type handler we might be able to construct a nested fields
+	# selection (but only if the handler's *fields* attribute is not empty).
+	nested = ()
+	if handler:
+		nested = tuple(set(handler.fields) - set(handler.exclude_nested))
 	
-	def render(self, request):
-		from .handlers import ModelHandler
-		if isinstance(self.handler, ModelHandler):
-			self.fields = self.handler.get_requested_fields(request)
-		else:
-			self.fields = ()
-			fields = self.handler.get_requested_fields(request)
-			def recursive_apply(data):
-				if isinstance(data, (list, tuple, set, models.query.QuerySet)):
-					return map(recursive_apply, data)
+	handler = handler or self.handler
+	
+	class Handler(handler):
+		# If we have no nested fields specification we fall back to the
+		# handler's default model representation.
+		fields = nested or handler.model_fields
+		exclude = ()
+		# Prevent this handler from ending up in (and messing up) the
+		# typemapper.
+		model = None
+	
+	return Handler
 
-				if not hasattr(data, 'items'):
-					return data
+Emitter.in_typemapper = in_typemapper
 
-				return dict([(key, value)
-					for key, value in data.items()
-					if key in fields or not fields and self.handler.is_field_allowed(key)])
-			self.handler.set_response_data(request, self.data,
-				recursive_apply(self.handler.get_response_data(request, self.data)))
+
+# Monkey-patch *Emitter.construct*.
+
+native_construct = Emitter.construct
+
+def construct(self):
+	"""
+	Allows for some stuff to be done right before and right after the response
+	is being constructed by the emitter:
+	
+	* fields selection is taken care of right before construction;
+	* a post-construction hook is invoked right after construction in order to
+	  give the handler the opportunity to make some last-minute modifications
+	  or to perform operations that modify the (unconstructed) data (like
+	  removing the data from database).
+	"""
+	
+	# Before actual construction takes place we have to deal with fields
+	# selection.
+	
+	fields = self.handler.get_requested_fields(self.request)
+	
+	if isinstance(self.handler, ModelHandler):
+		# If we are dealing with a model handler, we can simply delegate
+		# field selection to the emitter.
+		self.fields = fields
+	
+	else:
+		# Else we need to do the fields selection ourselves, as Piston's
+		# emitter doesn't do fields selection on non-model data.
+		self.fields = ()
 		
-		# self.fields = self.handler.get_emitter_fields(request)
-		# TODO: Don't run apply_requested_fields if self.data is a HttpResponse
-		# self.data = self.handler.apply_requested_fields(request, self.data)
-		self._request = request
-		rendered = super(JsonEmitter, self).render(request)
-		return rendered
+		def process_requested_fields(data):
+			if isinstance(data, (list, tuple, set, models.query.QuerySet)):
+				return map(process_requested_fields, data)
+			
+			# We make the assumption that an *items* attribute indicates that
+			# we can look for fields.
+			if not hasattr(data, 'items'):
+				return data
+			
+			return dict([(key, value)
+				for key, value in data.items()
+				if key in fields or not fields and self.handler.is_field_allowed(key)])
+		
+		# Update the to-be-constructed response in *this.data* with the
+		# fields-selected data.
+		self.handler.set_response_data(self.request,
+			process_requested_fields(self.handler.get_response_data(self.request, self.data)),
+			self.data
+		)
 	
-	def in_typemapper(self, *args, **kwargs):
-		# Is executed every time the emitter encounters model data for which
-		# no fields spec is known to the emitter -- it will try to find a
-		# corresponding handler (and fields spec) via this method.
-		return nested_mode(super(JsonEmitter, self).in_typemapper(*args, **kwargs))
+	# Invokes a post-construction hook on the handler whose return value is
+	# the definitive response ready for serialization.
+	return self.handler.response_constructed(native_construct(self), self.data, self.request)
+
+Emitter.construct = construct
+
+
+# Monkey-patch *Emitter.register*.
+
+native_register = Emitter.register
+
+def register(cls, name, klass, content_type='text/plain'):
+	"""
+	We need to monkey-patch this method in order to be able to monkey-patch
+	:meth:`piston.emitters.Emitter.render`, as the latter has got no
+	implementation and is not being invoked by its inheritors.
+	"""
+	
+	native_render = klass.render
+
+	def render(self, request):
+		"""
+		We need *request* in (our monkey-patched)
+		:meth:`piston.emitters.Emitter.construct`, and this method is the only
+		instance method on the emitter that is being invoked with a *request*
+		argument.
+		"""
+		self.request = request
+		return native_render(self, request)
+	
+	klass.render = render
+	
+	return native_register(name, klass, content_type)
+
+Emitter.register = classmethod(register)
+
+
+# Register response formats. Is guaranteed to use the monkey-patched
+# *Emitter.register*, which means the registered emitter type classes will be
+# fully monkey-patched as well.
+for format in set(settings.PISTON_FORMATS).intersection(ALL_FORMATS.keys()):
+	Emitter.register(format, *ALL_FORMATS.get(format))

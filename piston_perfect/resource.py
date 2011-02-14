@@ -1,3 +1,4 @@
+from django.db import connection
 from piston import resource
 
 
@@ -6,14 +7,24 @@ class Resource(resource.Resource):
 	Simple subclass of Piston's implementation.
 	"""
 	
-	callmap = dict(zip(
-		resource.Resource.callmap.keys(),
-		resource.Resource.callmap.keys(),
-	))
-	# callmap = dict(zip(
-	# 	resource.Resource.callmap.keys(),
-	# 	('request', ) * len(resource.Resource.callmap)
-	# ))
+	callmap = dict(zip(*([resource.Resource.callmap.keys()] * 2)))
+	"""
+	Just some crazy Python fun way to say::
+	
+	    dict(POST='POST', GET='GET', ... )
+	
+	"""
+	
+	def __call__(self, request, *args, **kwargs):
+		"""
+		As soon as the resource is being called we can say that Piston has
+		taken over. We take this moment to reset the query log, so we can read
+		it later to get an overview of all the database queries that were
+		incurred by Piston-based code (as opposed to stuff that happened
+		before, like in unrelated middleware).
+		"""
+		connection.queries = []
+		return super(Resource, self).__call__(request, *args, **kwargs)
 	
 	def form_validation_response(self, error):
 		"""
