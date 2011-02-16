@@ -1,7 +1,8 @@
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, ObjectDoesNotExist
 from django.db import connection
-from django.http import HttpResponseBadRequest
+from django.http import Http404, HttpResponseBadRequest, HttpResponseGone, HttpResponseNotAllowed, HttpResponseNotFound
 from piston import resource
+from .utils import MethodNotAllowed
 
 
 class Resource(resource.Resource):
@@ -9,12 +10,9 @@ class Resource(resource.Resource):
 	Simple subclass of Piston's implementation.
 	"""
 	
-	callmap = dict(zip(*([resource.Resource.callmap.keys()] * 2)))
+	callmap = dict(zip(resource.Resource.callmap.keys(), ['request'] * 4))
 	"""
-	Just some crazy Python fun way to say::
-	
-	    dict(POST='POST', GET='GET', ... )
-	
+	Route every request type to :meth:`.handlers.BaseHandler.request`.
 	"""
 	
 	def __call__(self, request, *args, **kwargs):
@@ -28,7 +26,8 @@ class Resource(resource.Resource):
 		connection.queries = []
 		return super(Resource, self).__call__(request, *args, **kwargs)
 	
-	def error_handler(self, e, request, meth, em_format):
+	
+	def error_handler(self, e, *args, **kwargs):
 		"""
 		If anything went wrong inside the handler, this method will try to
 		construct a meaningful error response (or not if we want to hide the
@@ -42,8 +41,15 @@ class Resource(resource.Resource):
 				errors=e.messages,
 			))
 		
-		return HttpResponseBadRequest(dict(
-			type='unknown',
-			message="Exception type %s" % type(e),
-			error=unicode(e),
-		))
+		if isinstance(e, (NotImplementedError, ObjectDoesNotExist)):
+			return HttpResponseGone()
+		
+		if isinstance(e, MethodNotAllowed):
+			return HttpResponseNotAllowed(e.permitted_methods)
+		
+		if isinstance(e, Http404):
+			return HttpResponseNotFound()
+		
+		# Else, force parent method to handle as a 500 (because the others are
+		# useless).
+		return super(Resource, self).error_handler(None, *args, **kwargs)

@@ -12,6 +12,7 @@ without touching anything beyond this module.
 """
 
 from django.db import models
+from django.http import HttpResponse
 from django.conf import settings
 from piston.emitters import Emitter
 from .handlers import ModelHandler
@@ -65,7 +66,7 @@ def in_typemapper(self, *args, **kwargs):
 	if handler:
 		nested = tuple(set(handler.fields) - set(handler.exclude_nested))
 	
-	handler = handler or self.handler
+	handler = handler or type(self.handler)
 	
 	class Handler(handler):
 		# If we have no nested fields specification we fall back to the
@@ -97,6 +98,18 @@ def construct(self):
 	  removing the data from database).
 	"""
 	
+	# Tell the emitter to not bother with fields selection unless we
+	# explicitly instruct it to do otherwise.
+	self.fields = ()
+	
+	try:
+		data = self.handler.get_response_data(self.request, self.data)
+	except KeyError:
+		# No data to be found on the response (probably because we are dealing
+		# with an error response), so don't bother with the fields selection
+		# and post-construction hook.
+		return native_construct(self)
+	
 	# Before actual construction takes place we have to deal with fields
 	# selection.
 	
@@ -106,11 +119,10 @@ def construct(self):
 		# If we are dealing with a model handler, we can simply delegate
 		# field selection to the emitter.
 		self.fields = fields
-	
+
 	else:
 		# Else we need to do the fields selection ourselves, as Piston's
 		# emitter doesn't do fields selection on non-model data.
-		self.fields = ()
 		
 		def process_requested_fields(data):
 			if isinstance(data, (list, tuple, set, models.query.QuerySet)):
@@ -121,14 +133,14 @@ def construct(self):
 			if not hasattr(data, 'items'):
 				return data
 			
-			return dict([(key, value)
-				for key, value in data.items()
-				if key in fields or not fields and self.handler.is_field_allowed(key)])
+			return dict([(field, value)
+				for field, value in data.items()
+				if field in fields or not fields and self.handler.may_output_field(field)])
 		
 		# Update the to-be-constructed response in *this.data* with the
 		# fields-selected data.
 		self.handler.set_response_data(self.request,
-			process_requested_fields(self.handler.get_response_data(self.request, self.data)),
+			process_requested_fields(data),
 			self.data
 		)
 	
@@ -159,6 +171,9 @@ def register(cls, name, klass, content_type='text/plain'):
 		instance method on the emitter that is being invoked with a *request*
 		argument.
 		"""
+		if isinstance(self.data, HttpResponse):
+			return self.data
+		
 		self.request = request
 		return native_render(self, request)
 	
