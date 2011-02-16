@@ -62,7 +62,7 @@ class class piston_perfect.handlers.BaseHandler
 
       Is used by ``is_field_allowed()`` to decide if a field should be
       included in the result. Note that this only applies to scenarios
-      in which ``fields`` is empty. Should be and iterable of field
+      in which ``fields`` is empty. Should be an iterable of field
       names and/or regular expression patterns. Its default setting is
       to exclude all field names that begin with ``_``.
 
@@ -139,8 +139,8 @@ class class piston_perfect.handlers.BaseHandler
       can be found. If this attribute is defined as ``True`` (which is
       the default) the default parameter name ``field`` will be used.
       Note that setting to (as opposed to "defining as") ``True`` will
-      not work. Disable request-level fields selection by setting this
-      to ``False``.
+      not work. Disable request-level fields selection by defining
+      this as ``False``.
 
       Multiple fields can be specified by including the parameter
       multiple times: ``?field=id&field=name`` is interpreted as the
@@ -234,13 +234,11 @@ class class piston_perfect.resource.Resource(handler, authentication=None)
 
          dict(POST='POST', GET='GET', ... )
 
-   form_validation_response(error)
+   error_handler(e, request, meth, em_format)
 
-      If an handler form does not validate, this method will construct
-      an error response containing details on why the validation
-      failed. This information is represented in the format that was
-      specified in the request (or in the default emitter format in
-      case none was given).
+      If anything went wrong inside the handler, this method will try
+      to construct a meaningful error response (or not if we want to
+      hide the character of the problem from the user).
 
 
 ``patches``

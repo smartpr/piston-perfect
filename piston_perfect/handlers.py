@@ -110,7 +110,7 @@ class BaseHandler(handler.BaseHandler):
 	If this attribute is defined as ``True`` (which is the default) the
 	default parameter name ``field`` will be used. Note that setting to (as
 	opposed to "defining as") ``True`` will not work. Disable request-level
-	fields selection by setting this to ``False``.
+	fields selection by defining this as ``False``.
 	
 	Multiple fields can be specified by including the parameter multiple
 	times: ``?field=id&field=name`` is interpreted as the selection ``('id',
@@ -121,7 +121,7 @@ class BaseHandler(handler.BaseHandler):
 	"""
 	Is used by :meth:`.is_field_allowed` to decide if a field should be
 	included in the result. Note that this only applies to scenarios in which
-	:attr:`fields` is empty. Should be and iterable of field names and/or
+	:attr:`fields` is empty. Should be an iterable of field names and/or
 	regular expression patterns. Its default setting is to exclude all field
 	names that begin with ``_``.
 	"""
@@ -174,16 +174,16 @@ class BaseHandler(handler.BaseHandler):
 	model_fields = 'model_key', 'model_type', 'model_description'
 	
 	@classmethod
-	def model_key(cls, model_instance):
-		return model_instance.pk
+	def model_key(cls, instance):
+		return instance.pk
 	
 	@classmethod
-	def model_type(cls, model_instance):
-		return model_instance._meta.verbose_name
+	def model_type(cls, instance):
+		return instance._meta.verbose_name
 	
 	@classmethod
-	def model_description(cls, model_instance):
-		return unicode(model_instance)
+	def model_description(cls, instance):
+		return unicode(instance)
 	
 	
 	authentication = None
@@ -550,6 +550,8 @@ class ModelHandler(BaseHandler):
 		return self.data_set(request, *args, **kwargs)
 	
 	def data_set(self, request, *args, **kwargs):
+		# TODO: Use ``.only`` -- or not (we may lose fields that we don't use
+		# directly, but do use indirectly f.e. via a resource method).
 		return self.model.objects.filter(**kwargs)
 	
 	def data_item(self, request, *args, **kwargs):

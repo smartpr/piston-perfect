@@ -1,4 +1,6 @@
+from django.core.exceptions import ValidationError
 from django.db import connection
+from django.http import HttpResponseBadRequest
 from piston import resource
 
 
@@ -26,17 +28,22 @@ class Resource(resource.Resource):
 		connection.queries = []
 		return super(Resource, self).__call__(request, *args, **kwargs)
 	
-	def form_validation_response(self, error):
+	def error_handler(self, e, request, meth, em_format):
 		"""
-		If an handler form does not validate, this method will construct an
-		error response containing details on why the validation failed. This
-		information is represented in the format that was specified in the
-		request (or in the default emitter format in case none was given).
+		If anything went wrong inside the handler, this method will try to
+		construct a meaningful error response (or not if we want to hide the
+		character of the problem from the user).
 		"""
-		response = super(Resource, self).form_validation_response(error)
-		response.content = dict(
-			code='invalid',
-			message="Invalid data supplied",
-			errors=error.form.errors,
-		)
-		return response
+		
+		if isinstance(e, ValidationError):
+			return HttpResponseBadRequest(dict(
+				type='validation',
+				message="Invalid operation requested",
+				errors=e.messages,
+			))
+		
+		return HttpResponseBadRequest(dict(
+			type='unknown',
+			message="Exception type %s" % type(e),
+			error=unicode(e),
+		))
