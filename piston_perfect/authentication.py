@@ -1,7 +1,7 @@
 from django.http import HttpResponseForbidden
 
-
-class Authentication(object):
+# TODO: Rename to ``DjangoAuthentication``.
+class DjangoAuthentication(object):
 	"""
 	Piston authenticator that blocks all requests with non-authenticated
 	sessions.

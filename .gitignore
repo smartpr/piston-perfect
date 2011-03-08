@@ -9,3 +9,4 @@
 *.orig
 docs/build/doctrees/*
 docs/build/html/*
+build/*

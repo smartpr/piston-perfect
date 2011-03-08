@@ -7,7 +7,7 @@ from django import forms
 from django.db import models, connection
 from django.conf import settings
 from piston import handler, resource
-from .authentication import Authentication
+from .authentication import DjangoAuthentication
 from .resource import Resource
 from .utils import MethodNotAllowed
 
@@ -64,7 +64,7 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 		# attribute for that reason is not a good idea, as that would render
 		# the resulting handler type unsuited for further inheritance.
 		if cls.authentication is True:
-			cls.authentication = Authentication()
+			cls.authentication = DjangoAuthentication()
 		
 		cls.resource = Resource(cls, authentication=cls.authentication)
 		
@@ -73,25 +73,26 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 class BaseHandler(handler.BaseHandler):
 	"""
 	All handlers should (directly or indirectly) inherit from this one. Its
-	public attributes and methods were devised with extensibility in mind, so
+	public attributes and methods were designed with extensibility in mind, so
 	don't hesitate to override.
 	
 	.. note::
 	   Piston's :attr:`piston.handler.BaseHandler.allowed_methods` attribute
 	   should not be used, as it is auto-generated based on the values of
-	   :attr:`.create`, :attr:`.read`, :attr:`.update` and :attr:`.delete`.
+	   :meth:`.create`, :meth:`.read`, :meth:`.update` and :meth:`.delete`.
 	"""
 	
 	__metaclass__ = BaseHandlerMeta
 	
 	
-	fields = ()	# TODO: Document that this field also has meaning for saving data => empty means no data will be accepted
+	fields = ()
 	"""
 	Specifies the fields that are allowed to be included in a response. It
 	also serves as the set of options for request-level fields selection (see
-	:attr:`request_fields`). If it is an empty iterable (the default) the
-	decision whether or not a field is allowed to be included is taken by
-	:meth:`.is_field_allowed`.
+	:attr:`request_fields`) and the base set of fields that are allowed as
+	incoming data (see :meth:`.may_input_field`). If it is an empty iterable
+	(the default) the decision whether or not a field is allowed to be
+	included is taken by :meth:`.is_field_allowed`.
 	
 	Note that the value of this attribute is not automatically used as field
 	definition on the emitter, as is the behavior of Piston's default base
@@ -176,7 +177,9 @@ class BaseHandler(handler.BaseHandler):
 	
 	def may_input_field(self, field):
 		"""
-		Decides if a field should be filtered out of incoming data.
+		Decides if a field should be filtered out of incoming data (in the
+		request body). The default behavior is to accept any fields that are
+		in :attr:`.fields` (if not empty) and not in :attr:`.exclude_in`.
 		"""
 		
 		if self.fields:
@@ -186,17 +189,32 @@ class BaseHandler(handler.BaseHandler):
 	
 	
 	model_fields = 'model_key', 'model_type', 'model_description'
+	"""
+	The set of fields that is used to represent a model instance in case no
+	explicit fields set has been specified (either via :attr:`.fields` or via
+	a fields definition in the request).
+	"""
 	
 	@classmethod
 	def model_key(cls, instance):
+		"""
+		Returns a key identifying the provided model instance.
+		"""
 		return instance.pk
 	
 	@classmethod
 	def model_type(cls, instance):
+		"""
+		Returns a text string representing the type of the provided model
+		instance.
+		"""
 		return instance._meta.verbose_name
 	
 	@classmethod
 	def model_description(cls, instance):
+		"""
+		Returns a description of the provided model instance.
+		"""
 		return unicode(instance)
 	
 	
@@ -204,13 +222,25 @@ class BaseHandler(handler.BaseHandler):
 	"""
 	The Piston authenticator that should be in effect on this handler. If
 	defined as ``True`` (which is not the same as assigning ``True``, as this
-	will not work) an instance of :class:`.authentication.Authentication` is
-	used. A value of ``None`` implies no authentication, which is the default.
+	will not work) an instance of
+	:class:`.authentication.DjangoAuthentication` is used. A value of ``None``
+	implies no authentication, which is the default.
 	"""
 	
 	
 	def validate(self, request, *args, **kwargs):
+		"""
+		Validates and cleanses incoming data (in the request body). Can be
+		overridden to extend this behavior with any type of validation of the
+		request.
+		"""
+		
 		if not request.data:
+			# ``PUT`` requests can have an empty body because they may be used
+			# to trigger operations other than updating data (such as managing
+			# many-to-many relations or sending out e-mails). ``POST``
+			# requests on the other hand must be accompanied with data in
+			# their body because they always mean to create an new entry.
 			if request.method.upper() == 'POST':
 				raise ValidationError("No data provided.")
 			return
@@ -218,19 +248,26 @@ class BaseHandler(handler.BaseHandler):
 		request.data = dict([(field, value)
 			for field, value in request.data.iteritems()
 			if self.may_input_field(field)])
-		
-		return
 	
 	
 	def working_set(self, request, *args, **kwargs):
 		"""
 		Returns the operation's base data set. No data beyond this set will be
-		accessed or modified.
+		accessed or modified. The reason why we need this one in addition to
+		:meth:`.data_set` is that :meth:`.data_item` needs to have a data set
+		to pick from -- we need to define which items it is allowed to obtain
+		(and which not). This data set should not have user filters applied
+		because those do not apply to item views.
 		"""
 		
 		raise NotImplementedError
 	
 	def data_set(self, request, *args, **kwargs):
+		"""
+		Returns the operation's result data set, which is always an iterable.
+		The difference with :meth:`.working_set` is that it returns the data
+		*after* all filters and ordering (not slicing) are applied.
+		"""
 		
 		data = self.working_set(request, *args, **kwargs)
 		
@@ -249,11 +286,19 @@ class BaseHandler(handler.BaseHandler):
 	
 	def data_item(self, request, *args, **kwargs):
 		"""
-		Returns the data item that is being worked on.
+		Returns the data item that is being worked on. This is how the handler
+		decides if the requested data is singular or not. By returning
+		``None`` we signal that this request should be handled as a request
+		for a set of data, as opposed to a request for a single record.
 		"""
 		return None
 	
 	def data(self, request, *args, **kwargs):
+		"""
+		Returns the data that is the result of the current operation, without
+		having to specify if the request is singular or plural.
+		"""
+		
 		data = self.data_item(request, *args, **kwargs)
 
 		if data is None:
@@ -265,8 +310,6 @@ class BaseHandler(handler.BaseHandler):
 	# The *request* parameter in the following methods can be used to
 	# construct responses that are structured differently for different types
 	# of requests.
-	
-	# TODO: Deal with scenario in which response is a HttpResponse.
 	
 	def get_response_data(self, request, response):
 		"""
@@ -288,31 +331,48 @@ class BaseHandler(handler.BaseHandler):
 	
 	filters = False
 	"""
-	Filter data query string parameter, or ``True`` if the default
-	(``filter``) should be used. Disabled by default.
+	User filter data query string parameter, or ``True`` if the default
+	(``filter``) should be used. Disabled (``False``) by default.
 	"""
 	
 	def filter_data(self, data, definition, values):
+		"""
+		Applies user filters (as specified in :attr:`.filters`) to the
+		provided data. Does nothing unless overridden with a method that
+		implements filter logic.
+		"""
 		return data
 	
 	
 	order = False
 	"""
 	Order data query string parameter, or ``True`` if the default (``order``)
-	should be used. Disabled by default.
+	should be used. Disabled (``False``) by default.
 	"""
 	
 	def order_data(self, data, *order):
+		"""
+		Orders the provided data. Does nothing unless overridden with a method
+		that implements ordering logic.
+		"""
 		return data
 	
 	
 	slice = False
 	"""
 	Slice data query string parameter, or ``True`` if the default (``slice``)
-	should be used. Disabled by default.
+	should be used. Disabled (``False``) by default.
 	"""
 	
 	def response_slice_data(self, response, request, *args, **kwargs):
+		"""
+		Slices the data set in *response*. This method's job is to interpret
+		the order parameters in the request (if any), translate them to a call
+		to :meth:`.slice_data` and alter the response respectively. Returns
+		a boolean value that indicates whether the data has been sliced or
+		not.
+		"""
+		
 		slice = request.GET.get(self.slice, None)
 		
 		if not slice:
@@ -347,6 +407,9 @@ class BaseHandler(handler.BaseHandler):
 		return True
 	
 	def slice_data(self, data, start=None, stop=None, step=None):
+		"""
+		Slices the provided data according to *start*, *stop* and *step*.
+		"""
 		try:
 			return data[start:stop:step]
 		except:
@@ -356,6 +419,10 @@ class BaseHandler(handler.BaseHandler):
 	
 	
 	def request(self, request, *args, **kwargs):
+		"""
+		All requests are entering the handler here.
+		"""
+		
 		if request.method.upper() == 'POST' and not self.data_item(request, *args, **kwargs) is None:
 			raise MethodNotAllowed('GET', 'PUT', 'DELETE')
 		
@@ -374,23 +441,44 @@ class BaseHandler(handler.BaseHandler):
 		return response
 	
 	def create(self, request, *args, **kwargs):
+		"""
+		Default implementation of a create operation, put in place when the
+		handler defines ``create = True``.
+		"""
 		return request.data
 	
 	def read(self, request, *args, **kwargs):
+		"""
+		Default implementation of a read operation, put in place when the
+		handler defines ``read = True``.
+		"""
 		return self.data(request, *args, **kwargs)
 	
 	def update(self, request, *args, **kwargs):
+		"""
+		Default implementation of an update operation, put in place when the
+		the handler defines ``update = True``.
+		"""
 		# If *request.data* is not an appropriate response, we should *make*
 		# it an appropriate response. Never directly use *self.data*, as that
-		# is not the result of an update operation.
+		# one can in no way be considered the result of an update operation.
 		return request.data
 	
 	def delete(self, request, *args, **kwargs):
+		"""
+		Default implementation of a delete operation, put in place when the
+		the handler defines ``delete = True``.
+		"""
 		return self.data(request, *args, **kwargs)
 	
 	
 	def response_add_debug(self, response, request):
-		# Unfortunately we lost *args*/*kwargs* in *response_constructed*.
+		"""
+		Adds debug information to the response -- currently the database
+		queries that were performed in this operation. May be overridden to
+		extend with custom debug information.
+		"""
+		# Unfortunately we lost *args* and *kwargs* in *response_constructed*.
 		response['debug'] = dict(
 			query_log=connection.queries,
 			query_count=len(connection.queries),
@@ -398,6 +486,14 @@ class BaseHandler(handler.BaseHandler):
 		return response
 	
 	def response_constructed(self, response, unconstructed, request):
+		"""
+		Is called right after the response has been constructed (converted
+		to a data structure with just dictionaries and lists), and right
+		before the response is being sent back to the client. Allows for some
+		last-minute operations that need the guarantee of being the last, or
+		that would impact the response data if it hadn't been constructed yet.
+		"""
+		
 		if request.method.upper() == 'DELETE':
 			self.data_safe_for_delete(self.get_response_data(request, unconstructed))
 		
@@ -407,6 +503,10 @@ class BaseHandler(handler.BaseHandler):
 		return response
 	
 	def data_safe_for_delete(self, data):
+		"""
+		If we want the delete operation to remove data without impacting the
+		data in the response we can do it safely here.
+		"""
 		pass
 
 
@@ -418,7 +518,7 @@ class ModelHandler(BaseHandler):
 	intended to be public, model data fields will not be included in the
 	response if they are not explicitly mentioned in
 	:attr:`~BaseHandler.fields`. If it is empty model data will be represented
-	in a generic way: key, type and description.
+	in a generic way as specified by :attr:`.model_fields`.
 	"""
 	
 	model = None
@@ -442,12 +542,20 @@ class ModelHandler(BaseHandler):
 			result
 		
 		try:
+			# Don't accept primary keys, as they should generally be constant
+			# and therefore not adjustable from outside.
 			return not self.model._meta.get_field(field, many_to_many=False).primary_key
 		except models.FieldDoesNotExist:
 			return False
 			
 	
 	def validate(self, request, *args, **kwargs):
+		"""
+		Turns the data on the request into model instances; a new instance
+		with the ``POST``'ed data or a current instance updated with the
+		``PUT``'ed data.
+		"""
+		
 		super(ModelHandler, self).validate(request, *args, **kwargs)
 		
 		if not request.data:
@@ -472,6 +580,8 @@ class ModelHandler(BaseHandler):
 	
 	
 	def working_set(self, request, *args, **kwargs):
+		# All keyword arguments that originate from the URL pattern are
+		# applied as filters to the *QuerySet*.
 		return self.model.objects.filter(**kwargs)
 	
 	def data_item(self, request, *args, **kwargs):
@@ -495,13 +605,23 @@ class ModelHandler(BaseHandler):
 		return super(ModelHandler, self).data_item(request, *args, **kwargs)
 	
 	def filter_data(self, data, definition, values):
+		"""
+		Recognizes and applies two types of filters:
+		
+		* If its *definition* (the value of the filter in :attr:`.filters`) is
+		  a text string, it will be interpreted as a filter on the *QuerySet*.
+		* If its definition is a list (or tuple or set), it will be
+		  interpreted as a search operation on all fields that are mentioned
+		  in this list.
+		
+		"""
 		
 		if isinstance(definition, basestring):
 			return data.filter(**{ definition: values })
 		
-		if isinstance(definition, (list, tuple)):
+		if isinstance(definition, (list, tuple, set)):
 			query = models.Q()
-		
+			
 			for term in ' '.join(values).split():
 				for field in definition:
 					query |= models.Q(**{ '%s__icontains' % field: term })
@@ -529,10 +649,10 @@ class ModelHandler(BaseHandler):
 	
 	
 	def create(self, request, *args, **kwargs):
-		# The *force_insert* should not be necessary here, but look at it as
-		# the ultimate guarantee that we are not messing with existing
-		# records.
 		try:
+			# The *force_insert* should not be necessary here, but look at it
+			# as the ultimate guarantee that we are not messing with existing
+			# records.
 			request.data.save(force_insert=True)
 		except:
 			# Not sure what errors we could get, but I think it's safe to just
