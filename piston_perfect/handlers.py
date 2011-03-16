@@ -33,8 +33,8 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 		# the two requirements by disabling operations (overriding them with
 		# ``False``) at the last minute, just before the class is being
 		# constructed.
-
-		# So, we get rid of the attrs that are operation = True,
+		# We get rid of the attrs that are of the form:
+		# 	 <operation> = True,
 		# so that they don't overwrite the function calls for the
 		# respective operations.
 		for operation in resource.Resource.callmap.values():
