@@ -33,13 +33,22 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 		# the two requirements by disabling operations (overriding them with
 		# ``False``) at the last minute, just before the class is being
 		# constructed.
+
+		# So, we get rid of the attrs that are operation = True,
+		# so that they don't overwrite the function calls for the
+		# respective operations.
 		for operation in resource.Resource.callmap.values():
 			attrs.setdefault(operation, False)
 			if attrs.get(operation) is True:
 				del attrs[operation]
-		
+
 		cls = super(BaseHandlerMeta, meta).__new__(meta, name, bases, attrs)
-		
+
+		# At this point, the  enabled operations are:
+		# 		- those that have been enabled as <operation> = True. These keep 	
+		#  		  the default implementation of the superclass.
+		#   	- the ones that have been overwritten explicitly in the handler.
+
 		# We always auto-generate (and thus overwrite) *allowed_methods*
 		# because the definition of which methods are allowed is now done via
 		# *create*, *read*, *update* and *delete* and *allowed_methods* should
@@ -47,7 +56,7 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 		cls.allowed_methods = tuple([method
 			for method, operation in resource.Resource.callmap.iteritems()
 			if callable(getattr(cls, operation))])
-		
+
 		# The general idea is that an attribute with value ``True`` indicates
 		# that we want to enable it with its default value.
 		
@@ -539,7 +548,7 @@ class ModelHandler(BaseHandler):
 		result = super(ModelHandler, self).may_input_field(field)
 		
 		if not result:
-			result
+			return result
 		
 		try:
 			# Don't accept primary keys, as they should generally be constant
