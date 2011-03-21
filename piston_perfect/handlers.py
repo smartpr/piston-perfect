@@ -62,7 +62,7 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 		
 		# Changing this attribute at run-time won't work, but removing the
 		# attribute for that reason is not a good idea, as that would render
-		# the resulting handler type unsuited for further inheritance.
+		# the resulting handler type unsuitable for further inheritance.
 		if cls.authentication is True:
 			cls.authentication = DjangoAuthentication()
 		
@@ -231,8 +231,8 @@ class BaseHandler(handler.BaseHandler):
 	def validate(self, request, *args, **kwargs):
 		"""
 		Validates and cleanses incoming data (in the request body). Can be
-		overridden to extend this behavior with any type of validation of the
-		request.
+		overridden to extend this behavior with other types of request
+		validation.
 		"""
 		
 		if not request.data:
@@ -310,7 +310,7 @@ class BaseHandler(handler.BaseHandler):
 	# The *request* parameter in the following methods can be used to
 	# construct responses that are structured differently for different types
 	# of requests.
-	
+
 	def get_response_data(self, request, response):
 		"""
 		Reads the data from a response structure. Raises a *KeyError* if
