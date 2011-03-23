@@ -4,6 +4,7 @@ Generic handlers.
 
 import re
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db import models, connection
 from django.conf import settings
 from piston import handler, resource
@@ -244,7 +245,10 @@ class BaseHandler(handler.BaseHandler):
 		validation.
 		"""
 		
-		if not request.data:
+		# TODO: Will *request.data* always be ``None`` if no data was provided
+		# in the request body? Will Piston even allow for an empty request
+		# body?
+		if request.data is None:
 			# ``PUT`` requests can have an empty body because they may be used
 			# to trigger operations other than updating data (such as managing
 			# many-to-many relations or sending out e-mails). ``POST``
@@ -567,7 +571,10 @@ class ModelHandler(BaseHandler):
 		
 		super(ModelHandler, self).validate(request, *args, **kwargs)
 		
-		if not request.data:
+		# TODO: Will *request.data* always be ``None`` if no data was provided
+		# in the request body? Will Piston even allow for an empty request
+		# body?
+		if request.data is None:
 			return
 		
 		if request.method.upper() == 'POST':
