@@ -10,6 +10,8 @@ from piston import handler, resource
 from .authentication import DjangoAuthentication
 from .resource import Resource
 from .utils import MethodNotAllowed
+from django.core.exceptions import ValidationError
+from custom_filters import filter_to_method
 
 
 class BaseHandlerMeta(handler.HandlerMetaClass):
@@ -574,6 +576,7 @@ class ModelHandler(BaseHandler):
 			request.data = self.model(**request.data)
 		
 		if request.method.upper() == 'PUT':
+			# current = model instance to be updated
 			current = self.data(request, *args, **kwargs)
 			
 			def update(current, data):
@@ -583,6 +586,8 @@ class ModelHandler(BaseHandler):
 					# TODO: Should we anticipate on errors here?
 					setattr(current, field, value)
 			
+			# update the model instance with the 
+			# data given in the PUT request 
 			update(current, request.data)
 			
 			request.data = current
@@ -626,6 +631,11 @@ class ModelHandler(BaseHandler):
 		"""
 		
 		if isinstance(definition, basestring):
+			# If the definition's suffix is equal to the name of a custom
+			# lookup filter, call the corresponding method.
+			for lookup in filter_to_method:
+				if definition.endswith(lookup):
+					return filter_to_method[lookup](data, definition, values)
 			return data.filter(**{ definition: values })
 		
 		if isinstance(definition, (list, tuple, set)):
