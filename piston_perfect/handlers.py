@@ -4,6 +4,7 @@ Generic handlers.
 
 import re
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db import models, connection
 from django.conf import settings
 from piston import handler, resource
@@ -73,7 +74,7 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 		
 		# Changing this attribute at run-time won't work, but removing the
 		# attribute for that reason is not a good idea, as that would render
-		# the resulting handler type unsuited for further inheritance.
+		# the resulting handler type unsuitable for further inheritance.
 		if cls.authentication is True:
 			cls.authentication = DjangoAuthentication()
 		
@@ -242,11 +243,14 @@ class BaseHandler(handler.BaseHandler):
 	def validate(self, request, *args, **kwargs):
 		"""
 		Validates and cleanses incoming data (in the request body). Can be
-		overridden to extend this behavior with any type of validation of the
-		request.
+		overridden to extend this behavior with other types of request
+		validation.
 		"""
 		
-		if not request.data:
+		# TODO: Will *request.data* always be ``None`` if no data was provided
+		# in the request body? Will Piston even allow for an empty request
+		# body?
+		if request.data is None:
 			# ``PUT`` requests can have an empty body because they may be used
 			# to trigger operations other than updating data (such as managing
 			# many-to-many relations or sending out e-mails). ``POST``
@@ -321,7 +325,7 @@ class BaseHandler(handler.BaseHandler):
 	# The *request* parameter in the following methods can be used to
 	# construct responses that are structured differently for different types
 	# of requests.
-	
+
 	def get_response_data(self, request, response):
 		"""
 		Reads the data from a response structure. Raises a *KeyError* if
@@ -569,7 +573,10 @@ class ModelHandler(BaseHandler):
 		
 		super(ModelHandler, self).validate(request, *args, **kwargs)
 		
-		if not request.data:
+		# TODO: Will *request.data* always be ``None`` if no data was provided
+		# in the request body? Will Piston even allow for an empty request
+		# body?
+		if request.data is None:
 			return
 		
 		if request.method.upper() == 'POST':
