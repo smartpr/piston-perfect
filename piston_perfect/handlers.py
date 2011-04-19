@@ -583,12 +583,14 @@ class ModelHandler(BaseHandler):
 			request.data = self.model(**request.data)
 		
 		if request.method.upper() == 'PUT':
-			# current = model instance to be updated
+			# current = model instance(s) to be updated
 			current = self.data(request, *args, **kwargs)
 			
 			def update(current, data):
 				if not isinstance(current, self.model):
 					map(update, current, [data] * len(current))
+
+				# Update the values of model instance given by `current`				
 				for field, value in data.iteritems():
 					# TODO: Should we anticipate on errors here?
 					setattr(current, field, value)
@@ -598,7 +600,14 @@ class ModelHandler(BaseHandler):
 			update(current, request.data)
 			
 			request.data = current
-	
+
+			# request.data contains a model instance or a list of model instances 
+			# that have been updated, but not yet saved in the database.
+			# By 'updated' we mean data that have been in the data set of the
+			# update operation, regardless of whether any of their fields have
+			# been modified or not.
+	        # The actual save() of model instances is done in the update()
+			# method of the handler.
 	
 	def working_set(self, request, *args, **kwargs):
 		# All keyword arguments that originate from the URL pattern are
@@ -690,6 +699,8 @@ class ModelHandler(BaseHandler):
 	read = True
 	
 	def update(self, request, *args, **kwargs):
+		# Returns the model instance(s) in request.data, that have been
+		# successfully updated
 		def persist(instance):
 			try:
 				instance.save(force_update=True)
