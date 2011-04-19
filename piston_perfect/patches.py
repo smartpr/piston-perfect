@@ -187,5 +187,5 @@ Emitter.register = classmethod(register)
 # Register response formats. Is guaranteed to use the monkey-patched
 # *Emitter.register*, which means the registered emitter type classes will be
 # fully monkey-patched as well.
-for format in set(settings.PISTON_FORMATS).intersection(ALL_FORMATS.keys()):
+for format in set(getattr(settings, 'PISTON_FORMATS', ('json', ))).intersection(ALL_FORMATS.keys()):
 	Emitter.register(format, *ALL_FORMATS.get(format))

@@ -12,20 +12,12 @@ functions as a layer on top of :mod:`piston`.
 .. automodule:: piston_perfect
    :members:
 
-Make sure to put the following settings in your Django settings module::
+You can use the following settings attribute to specify the data formats that
+you want your API to support:
 
-   PISTON_IGNORE_DUPE_MODELS = True
-   PISTON_FORMATS = 'json',	# Replace with your formats of choice.
+   PISTON_FORMATS = 'json',     # Defaults to `'json',`.
 
 :TODO: Examples
-
-.. note::
-   The first is an obscure Piston setting that is required to prevent the
-   warning in :class:`piston.handler.HandlerMetaClass`, which also crashes if
-   the model that it is trying to put into the :dfn:`typemapper` is ``None``.
-   This in turn is necessary to prevent the custom handler types that are
-   created in :meth:`piston.emitters.Emitter.in_typemapper` from being
-   registered in (and messing up) the typemapper.
 
 :mod:`~piston_perfect.handlers`
 -------------------------------

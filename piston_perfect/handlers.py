@@ -44,9 +44,15 @@ class BaseHandlerMeta(handler.HandlerMetaClass):
 			attrs.setdefault(operation, False)
 			if attrs.get(operation) is True:
 				del attrs[operation]
-
-		cls = super(BaseHandlerMeta, meta).__new__(meta, name, bases, attrs)
-
+		
+		# Skip the implementation of `handler.HandlerMetaClass` because it is
+		# nothing but a pain in the ass. (It messes up the typemapper and
+		# requires `PISTON_IGNORE_DUPE_MODELS = True`.)
+		cls = type.__new__(meta, name, bases, attrs)
+		
+		if getattr(cls, 'model', None):
+			handler.typemapper[cls] = (cls.model, cls.is_anonymous)
+		
 		# At this point, the  enabled operations are:
 		# 		- those that have been enabled as <operation> = True. These keep 	
 		#  		  the default implementation of the superclass.
