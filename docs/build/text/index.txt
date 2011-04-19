@@ -11,22 +11,13 @@ module named ``piston_perfect`` that functions as a layer on top of
 The contents of this module are modeled after the contents of
 ``piston`` (save for some subtle changes in naming).
 
-Make sure to put the following settings in your Django settings
-module:
+You can use the following settings attribute to specify the data
+formats that you want your API to support:
 
-   PISTON_IGNORE_DUPE_MODELS = True
-   PISTON_FORMATS = 'json',     # Replace with your formats of choice.
+   PISTON_FORMATS = 'json',     # Defaults to *'json',*.
 
 TODO:
    Examples
-
-Note: The first is an obscure Piston setting that is required to prevent
-  the warning in ``piston.handler.HandlerMetaClass``, which also
-  crashes if the model that it is trying to put into the *typemapper*
-  is ``None``. This in turn is necessary to prevent the custom handler
-  types that are created in
-  ``piston.emitters.Emitter.in_typemapper()`` from being registered in
-  (and messing up) the typemapper.
 
 
 ``handlers``
@@ -137,8 +128,8 @@ class class piston_perfect.handlers.BaseHandler
    validate(request, *args, **kwargs)
 
       Validates and cleanses incoming data (in the request body). Can
-      be overridden to extend this behavior with any type of
-      validation of the request.
+      be overridden to extend this behavior with other types of
+      request validation.
 
    working_set(request, *args, **kwargs)
 
