@@ -22,8 +22,14 @@ def in_all_filter(data, definition, values):
 	field = definition[:-8]
 	
 	for value in values:
+		# If a value is empty, or is 'null', then we apply None as the field
+		# lookup value
+		if value in ['', 'null']:
+			value = None
+
 		data = data.filter(**{field:value})
 	return data
+
 
 # Maps custom lookups to their handler methods
 filter_to_method = {
