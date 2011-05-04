@@ -199,7 +199,6 @@ class BaseHandler(handler.BaseHandler):
 		request body). The default behavior is to accept any fields that are
 		in :attr:`.fields` (if not empty) and not in :attr:`.exclude_in`.
 		"""
-		
 		if self.fields:
 			return field in set(self.fields) - set(self.exclude_in)
 		
@@ -266,10 +265,26 @@ class BaseHandler(handler.BaseHandler):
 				raise ValidationError("No data provided.")
 			return
 		
-		request.data = dict([(field, value)
-			for field, value in request.data.iteritems()
-			if self.may_input_field(field)])
-	
+		# PUT request with array of data has no sense.
+		elif isinstance(request.data, list) and request.method.upper() == 'PUT':
+			raise ValidationError("Illegal operation: PUT request with array in request body")			
+		
+		# Should only happen in POST request with an array of data
+		elif isinstance(request.data, list):
+			new_request_data = []
+			for item in request.data:
+				new_request_data.append(dict([(field, value)
+					for field, value in item.iteritems()
+					if self.may_input_field(field)])							
+				)
+			request.data = new_request_data
+		
+		# Only one data item in request.data
+		else:
+			request.data = dict([(field, value)
+				for field, value in request.data.iteritems()
+				if self.may_input_field(field)])
+
 	
 	def working_set(self, request, *args, **kwargs):
 		"""
@@ -584,9 +599,14 @@ class ModelHandler(BaseHandler):
 		# body?
 		if request.data is None:
 			return
-		
+
 		if request.method.upper() == 'POST':
-			request.data = self.model(**request.data)
+			# Single data item in request body
+			if not isinstance(request.data, list):
+				request.data = self.model(**request.data)
+			# Array of data items
+			else:				
+				request.data = [self.model(**data_item) for data_item in request.data]
 		
 		if request.method.upper() == 'PUT':
 			# current = model instance(s) to be updated
@@ -606,7 +626,6 @@ class ModelHandler(BaseHandler):
 			update(current, request.data)
 			
 			request.data = current
-
 			# request.data contains a model instance or a list of model instances 
 			# that have been updated, but not yet saved in the database.
 			# By 'updated' we mean data that have been in the data set of the
@@ -690,6 +709,18 @@ class ModelHandler(BaseHandler):
 	
 	
 	def create(self, request, *args, **kwargs):
+		# request.data is an array of self.model instances
+		if isinstance(request.data, list):
+			unsuccessful = []
+			for instance in request.data:
+				try:
+					instance.save(force_insert=True)
+				except:
+					unsuccessful.append(instance)
+
+			return set(request.data) - set(unsuccessful)
+
+		# request.data is a single self.model instance
 		try:
 			# The *force_insert* should not be necessary here, but look at it
 			# as the ultimate guarantee that we are not messing with existing
