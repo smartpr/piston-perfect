@@ -24,8 +24,16 @@ class Resource(resource.Resource):
 		before, like in unrelated middleware).
 		"""
 		connection.queries = []
-		return super(Resource, self).__call__(request, *args, **kwargs)
-	
+		response = super(Resource, self).__call__(request, *args, **kwargs)
+
+		# This is the only chance we have to interact with the HTTPResponse
+		# object `response`. So far we were only dealing with data, which were
+		# serialized using the selected emitter (line 194 of piston.resource)
+		# and packed in an HTTPResponse object (line 207 or piston.resource).
+		if 'format' in request.GET and request.GET.get('format') == 'excel':
+			response['Content-Disposition'] = 'attachment; filename=export.xls'
+		
+		return response
 	
 	def error_handler(self, e, *args, **kwargs):
 		"""

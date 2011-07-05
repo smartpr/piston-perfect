@@ -27,6 +27,7 @@ setup(
 		# release of `0.2.3rc1`, so that's what we require here. For more
 		# explanation refer to `smartpr.api.emitters`.
 		"django-piston>=0.2.3rc1",
+		"xlwt",
 	),
 	zip_safe=True,
 )
