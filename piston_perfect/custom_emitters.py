@@ -3,7 +3,6 @@ import xlwt, StringIO
 from django.utils.encoding import smart_unicode, force_unicode, smart_str
                     
 
-## {{{ http://code.activestate.com/recipes/466341/ (r1)
 def _to_unicode(string):
 	""" Return the unicode repsesentation of string"""
 
@@ -15,7 +14,7 @@ def _to_unicode(string):
 		return unicode(ascii_text)
 
 def to_utf8(string):
-	"""Return the utf-8 encode representation of the string """
+	"""Return the utf-8 encoded representation of the string """
 	unic = _to_unicode(string)
 	return unic.encode('utf-8')
 
