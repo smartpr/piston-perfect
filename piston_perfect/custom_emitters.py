@@ -40,13 +40,23 @@ class ExcelEmitter(Emitter):
 			
 			col = 0			
 			for key in self.fields:
-				value = to_utf8(record[key])
-				#if isinstance(value, list):
-				#	value = [unicode(i).encode('utf-8') for i in value]
-				#	value = unicode(value)
-                #
-				#if isinstance(value, dict):
-				#	value = unicode(value)
+				value = ""
+				field_value = record[key]
+				
+				# I merge lists or dicts to "\r\n"-separated strings
+				# Why? 
+				# 1. They look better (i think)
+				# 2. They non-ASCII chars appear correctly
+				if isinstance(field_value, list):
+					if field_value:
+						field_value = [to_utf8(item) for item in field_value]
+    					value = "\r\n".join(field_value)
+				elif isinstance(field_value, dict):
+					if field_value:
+						value = "\r\n".join(to_utf8(key) + ":" + to_utf8(value)  for key, value in
+							field_value.items())
+				else:
+					value = to_utf8(record[key])
 
 				ws.write(row, col, value )
 				col = col + 1
@@ -55,7 +65,7 @@ class ExcelEmitter(Emitter):
 		return stream.getvalue()
 	# TODO
     # Works only for outputting handlers extending the ModelHandler class
-	# Non-ASCII characters JSONField fields appear encoded
+	# Doesn't really work with outputing nested fields 
 
 Emitter.register('excel', ExcelEmitter, 'application/vnd.ms-excel')
  
