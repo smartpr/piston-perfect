@@ -69,3 +69,10 @@ class ExcelEmitter(Emitter):
 
 Emitter.register('excel', ExcelEmitter, 'application/vnd.ms-excel')
  
+               
+class HTMLEmitter(Emitter):
+	def render(self, request):
+		data = self.construct()['data']	
+		return data
+
+Emitter.register('html', HTMLEmitter, 'text/html')

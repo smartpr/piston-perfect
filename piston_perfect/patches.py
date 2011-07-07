@@ -15,7 +15,7 @@ from django.db import models
 from django.http import HttpResponse
 from django.conf import settings
 from piston.emitters import Emitter
-from custom_emitters import ExcelEmitter
+from custom_emitters import ExcelEmitter, HTMLEmitter
 from .handlers import ModelHandler
 
 # These are all the natively supported formats, including their emitter class
@@ -187,5 +187,5 @@ Emitter.register = classmethod(register)
 # Register response formats. Is guaranteed to use the monkey-patched
 # *Emitter.register*, which means the registered emitter type classes will be
 # fully monkey-patched as well.
-for format in set(getattr(settings, 'PISTON_FORMATS', ('json', 'excel' ))).intersection(ALL_FORMATS.keys()):
+for format in set(getattr(settings, 'PISTON_FORMATS', ('json', 'excel', 'html' ))).intersection(ALL_FORMATS.keys()):
 	Emitter.register(format, *ALL_FORMATS.get(format))
