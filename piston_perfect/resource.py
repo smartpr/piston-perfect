@@ -3,6 +3,7 @@ from django.db import connection
 from django.http import Http404, HttpResponseBadRequest, HttpResponseGone, HttpResponseNotAllowed, HttpResponseNotFound
 from piston import resource
 from .utils import MethodNotAllowed
+import datetime
 
 
 class Resource(resource.Resource):
@@ -31,7 +32,9 @@ class Resource(resource.Resource):
 		# serialized using the selected emitter (line 194 of piston.resource)
 		# and packed in an HTTPResponse object (line 207 or piston.resource).
 		if 'format' in request.GET and request.GET.get('format') == 'excel':
-			response['Content-Disposition'] = 'attachment; filename=export.xls'
+			date = datetime.date.today()
+			response['Content-Disposition'] = 'attachment; filename=Smart.pr-export-%s.xls' % \
+				date				
 		
 		return response
 	
