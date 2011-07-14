@@ -95,7 +95,8 @@ class BaseHandler(handler.BaseHandler):
 	don't hesitate to override.
 	
 	.. note::
-	   Piston's :attr:`piston.handler.BaseHandler.allowed_methods` attribute
+	   
+	   Pistoff's :attr:`pistoff.handler.BaseHandler.allowed_methods` attribute
 	   should not be used, as it is auto-generated based on the values of
 	   :meth:`.create`, :meth:`.read`, :meth:`.update` and :meth:`.delete`.
 	"""

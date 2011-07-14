@@ -1,5 +1,5 @@
 """
-The contents of this module are modeled after the contents of :mod:`piston`
+The contents of this module are modeled after the contents of :mod:`pistoff`
 (save for some subtle changes in naming).
 """
 

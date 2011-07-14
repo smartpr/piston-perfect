@@ -37,9 +37,9 @@ native_in_typemapper = Emitter.in_typemapper
 
 def in_typemapper(self, *args, **kwargs):
 	"""
-	Is called by :meth:`piston.emitters.Emitter.construct` when it encounters
+	Is called by :meth:`pistoff.emitters.Emitter.construct` when it encounters
 	model data and no fields specification is readily available (in
-	:attr:`piston.emitters.Emitter.fields`). This can be the case in two
+	:attr:`pistoff.emitters.Emitter.fields`). This can be the case in two
 	scenarios:
 	
 	1. the model data is nested, i.e. referred to by another model instance;
@@ -159,7 +159,7 @@ native_register = Emitter.register
 def register(cls, name, klass, content_type='text/plain'):
 	"""
 	We need to monkey-patch this method in order to be able to monkey-patch
-	:meth:`piston.emitters.Emitter.render`, as the latter has got no
+	:meth:`pistoff.emitters.Emitter.render`, as the latter has got no
 	implementation and is not being invoked by its inheritors.
 	"""
 	
@@ -168,7 +168,7 @@ def register(cls, name, klass, content_type='text/plain'):
 	def render(self, request):
 		"""
 		We need *request* in (our monkey-patched)
-		:meth:`piston.emitters.Emitter.construct`, and this method is the only
+		:meth:`pistoff.emitters.Emitter.construct`, and this method is the only
 		instance method on the emitter that is being invoked with a *request*
 		argument.
 		"""
