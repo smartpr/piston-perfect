@@ -1,4 +1,4 @@
-from piston.emitters import Emitter
+from pistoff.emitters import Emitter
 import xlwt, StringIO
 from django.utils.encoding import smart_unicode, force_unicode, smart_str
                     

@@ -14,9 +14,10 @@ without touching anything beyond this module.
 from django.db import models
 from django.http import HttpResponse
 from django.conf import settings
-from piston.emitters import Emitter
+from pistoff.emitters import Emitter
 from custom_emitters import ExcelEmitter, HTMLEmitter
 from .handlers import ModelHandler
+
 
 # These are all the natively supported formats, including their emitter class
 # and content type. Save for later reference.

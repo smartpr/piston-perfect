@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
 from django.db import connection
 from django.http import Http404, HttpResponseBadRequest, HttpResponseGone, HttpResponseNotAllowed, HttpResponseNotFound
-from piston import resource
+from pistoff import resource
 from .utils import MethodNotAllowed
 import datetime
 

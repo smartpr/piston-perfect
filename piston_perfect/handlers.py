@@ -7,7 +7,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.db import models, connection
 from django.conf import settings
-from piston import handler, resource
+from pistoff import handler, resource
 from .authentication import DjangoAuthentication
 from .resource import Resource
 from .utils import MethodNotAllowed
