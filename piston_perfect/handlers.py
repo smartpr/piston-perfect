@@ -459,7 +459,6 @@ class BaseHandler(handler.BaseHandler):
 		"""
 		All requests are entering the handler here.
 		"""
-		
 		if request.method.upper() == 'POST' and not self.data_item(request, *args, **kwargs) is None:
 			raise MethodNotAllowed('GET', 'PUT', 'DELETE')
 		
@@ -638,7 +637,7 @@ class ModelHandler(BaseHandler):
 	def working_set(self, request, *args, **kwargs):
 		# All keyword arguments that originate from the URL pattern are
 		# applied as filters to the *QuerySet*.
-		return self.model.objects.filter(**kwargs)
+		return self.model.objects.select_related().filter(**kwargs)
 	
 	def data_item(self, request, *args, **kwargs):
 		# First we check if we have been provided with conditions that are
