@@ -27,7 +27,7 @@ setup(
 		# release of `0.2.3rc1`, so that's what we require here. For more
 		# explanation refer to `smartpr.api.emitters`.
 		"django-pistoff",
-		"xlwt",
+		"xlwt>=0.7.2,<=0.7.2",
 	),
 	zip_safe=True,
 )
