@@ -73,10 +73,16 @@ Emitter.register('excel', ExcelEmitter, 'application/vnd.ms-excel')
 class HTMLEmitter(Emitter):
 	def render(self, request):
 		construct = self.construct()
+
 		if 'data' in construct:
+			# Correct response
 			return construct['data']
-		
-		return
+
+		elif 'errors' in construct:
+			# Validation was raised
+			return construct['errors']
+
+		return None			
 		
 
 Emitter.register('html', HTMLEmitter, 'text/html')
