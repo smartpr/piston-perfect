@@ -637,7 +637,26 @@ class ModelHandler(BaseHandler):
 	def working_set(self, request, *args, **kwargs):
 		# All keyword arguments that originate from the URL pattern are
 		# applied as filters to the *QuerySet*.
-		return self.model.objects.select_related().filter(**kwargs)
+
+		# We were using select_related() but decided to skip it. As we `found
+		# out <https://code.djangoproject.com/ticket/17>_`, the use of
+		# select_related() causes the WSGI process to use a lot of memory to
+		# reference the same database records. There are cases when this is
+		# catastrophic, and crashed the server due to memory problems.
+
+		# eg.    
+		# A query selects the recipients of a Mailing m, of NewsRelease n.
+		# The use of select_related() causes every recipient instance, to
+		# reference the Mailing, which references the NewsRelease. If there are
+		# X recipients, every one of them references a separate copy of m, and every 
+		# copy of m references a separate copy of y. If there are 1000
+		# recipients, and n is a huge NewsRelease, then we are in big trouble.
+
+		# On the other hand, if we don't use select_related(), references from
+		# a recipient to a Mailing, and from the Mailing to a NewsRelease, are
+		# done in a lazy fashion (only when asked), so we don't have this huge
+		# memory overhead to deal with.              
+		return self.model.objects.filter(**kwargs)
 	
 	def data_item(self, request, *args, **kwargs):
 		# First we check if we have been provided with conditions that are
