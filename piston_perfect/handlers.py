@@ -458,7 +458,7 @@ class BaseHandler(handler.BaseHandler):
 	def request(self, request, *args, **kwargs):
 		"""
 		All requests are entering the handler here.
-		"""
+		"""		
 		if request.method.upper() == 'POST' and not self.data_item(request, *args, **kwargs) is None:
 			raise MethodNotAllowed('GET', 'PUT', 'DELETE')
 		
@@ -775,5 +775,12 @@ class ModelHandler(BaseHandler):
 	
 	
 	def data_safe_for_delete(self, data):
-		data.delete()
+		# The delete() Django method can only be called on a QuerySet or on a
+		# Model instance. However, sometimes data=None (in cases where a
+		# singular DELETE request has been issued, but the model instancei
+		# specified cannot be deleted because of some dependencies), and the 
+		# delete() cannot be applied on a None object. Therefore, we need the check `if data`
+		if data:
+			data.delete()
+
 		return super(ModelHandler, self).data_safe_for_delete(data)
