@@ -313,7 +313,12 @@ class BaseHandler(handler.BaseHandler):
 			for name, definition in filters.iteritems():
 				values = request.GET.getlist(name)
 				if values:
-					data = self.filter_data(data, definition, values)
+					try:
+						data = self.filter_data(data, definition, values)
+					except ValueError:
+						# Happens when giving invalid filter type data, like
+						# for example providing a string instead of integer.
+						raise ValidationError('Invalid filter data provided')
 		
 		order = request.GET.getlist(self.order)
 		if order:
