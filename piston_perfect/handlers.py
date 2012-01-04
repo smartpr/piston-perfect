@@ -470,16 +470,20 @@ class BaseHandler(handler.BaseHandler):
 		if hasattr(request, 'data'):
 			self.validate(request, *args, **kwargs)
 		
-		response = self.set_response_data(request,
-			getattr(self, resource.Resource.callmap.get(request.method.upper()))(request, *args, **kwargs))
-		
+		# Pick action to run
+		action = getattr(self, 	resource.Resource.callmap.get(request.method.upper()))
+		# Run
+		response = action(request, *args, **kwargs)
+		# Set response data structure
+		response_structure = self.set_response_data(request,response)
+
 		# Slicing should be done after everything else, as it is to be
 		# perceived as a "view on the data set in the response," rather than
 		# a selection mechanism to influence the data that the requested
 		# operation should work with.
-		self.response_slice_data(response, request, *args, **kwargs)
+		self.response_slice_data(response_structure, request, *args, **kwargs)
 		
-		return response
+		return response_structure
 	
 	def create(self, request, *args, **kwargs):
 		"""
@@ -733,8 +737,9 @@ class ModelHandler(BaseHandler):
 	
 	
 	def create(self, request, *args, **kwargs):
-		# request.data is an array of self.model instances
 		if isinstance(request.data, list):
+			# request.data is an array of self.model instances
+			
 			unsuccessful = []
 			for instance in request.data:
 				try:
@@ -742,18 +747,25 @@ class ModelHandler(BaseHandler):
 				except:
 					unsuccessful.append(instance)
 
-			return set(request.data) - set(unsuccessful)
+			if unsuccessful:
+				# Remove model instances that were not saved successfully, from
+				# ``request.data``
+				request.data = set(request.data) - set(unsuccessful)
+			else:
+				# All instances have been saved successfully:
+				pass
 
-		# request.data is a single self.model instance
-		try:
-			# The *force_insert* should not be necessary here, but look at it
-			# as the ultimate guarantee that we are not messing with existing
-			# records.
-			request.data.save(force_insert=True)
-		except:
-			# Not sure what errors we could get, but I think it's safe to just
-			# assume that *any* error means that no record has been created.
-			request.data = None
+		else:
+			# request.data is a single self.model instance
+			try:
+				# The *force_insert* should not be necessary here, but look at it
+				# as the ultimate guarantee that we are not messing with existing
+				# records.
+				request.data.save(force_insert=True)
+			except:
+				# Not sure what errors we could get, but I think it's safe to just
+				# assume that *any* error means that no record has been created.
+				request.data = None
 		
 		return super(ModelHandler, self).create(request, *args, **kwargs)
 	
