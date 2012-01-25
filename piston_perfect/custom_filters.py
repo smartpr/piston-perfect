@@ -105,21 +105,22 @@ def in_list_filter(data, definition, values):
 	Query on the ContactHandler:
 	/contacts/?email=already.late@gmail.com&email=pambo@smart.pr
 
-	The filter ``email`` is defined as ``emails_in_list``, so method
-	``in_list`` is called, with values=['already.late@gmail.com',
+	The filter ``email`` is defined as ``emails_in_list``, so function
+	``in_list_filter`` is called, with values=['already.late@gmail.com',
 	'pambo@smart.pr',]. What the query asks for is: give me all contacts whose
 	``emails`` field (which is a JSONField), contains one of the emails in
 	``values``.
 
 	A smart way to find this is:
 	(First keep in mind that a JSONField is on MySQL level, a text field)
-	- Find all the Contact instances that contain a string LIKE at least one of  the strings in
+	- Find all the Contact instances that contain a string which is LIKE at least one of  the strings in
 	  ``values``. This has 2 benefits:
 	  - Directly translated to SQL, so its fast.
 	  - Limits the size of the QuerySet drastically. 
 	- Iterate on the queryset and find the Contact instances that contain
 	  at least an entry EXACTLY as it is in the ``values`` list. This step is
-	  very fast, since the size of the queryset is really small.
+	  very fast and light in terms of memory, since the size of the queryset is
+	  really small.
  
 	""" 
 	# First I issue a much more generic query, and find the model instances
