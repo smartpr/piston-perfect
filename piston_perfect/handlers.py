@@ -463,7 +463,7 @@ class BaseHandler(handler.BaseHandler):
 	def request(self, request, *args, **kwargs):
 		"""
 		All requests are entering the handler here.
-		"""		
+		"""	
 		if request.method.upper() == 'POST' and not self.data_item(request, *args, **kwargs) is None:
 			raise MethodNotAllowed('GET', 'PUT', 'DELETE')
 		
@@ -665,6 +665,14 @@ class ModelHandler(BaseHandler):
 		# a recipient to a Mailing, and from the Mailing to a NewsRelease, are
 		# done in a lazy fashion (only when asked), so we don't have this huge
 		# memory overhead to deal with.              
+
+		# Wait a minute... Lazy or not, still the data all have to be populated
+		# before constructing the response. So we will still need the same
+		# memory, right?
+		
+		# Update 5/1/2012: Using ``depth=1`` forces the select_related to go up
+		# to a depth of 1 to retrieve foreign keys.
+
 		return self.model.objects.filter(**kwargs)
 	
 	def data_item(self, request, *args, **kwargs):
