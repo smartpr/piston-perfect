@@ -34,7 +34,13 @@ class ExcelEmitter(Emitter):
 			ws.write(0, col, field_name.capitalize())
 			col = col + 1
 
+        # In case the ``data`` is a dictionary (eg the request was asking for a
+		# single model instance), we transform it to a list
+		if isinstance(data, dict):
+			data = [data]
+
 		row = 1		
+
 		for record in data:
 			# every record is a dict
 			
