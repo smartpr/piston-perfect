@@ -101,16 +101,19 @@ def in_list_filter(data, definition, values):
 	"""
 	``@param data``:		The queryset on which the filter will be applied on
 
-	``@param definition``:	A string representing ``<field> + __in_list`', eg
+	``@param definition``:	A string representing ``<field> + __in_list``, eg
 	``emails__in_list``
 
 	``@param values``:      Tuple with the values that will be applied on the
 	lookup filters.
 	
-	``@return``:	        Remaining queryset after the filters have been
+	``@return``:	        Remaining queryset after the filter has been
+	applied.
 
-	Handles the ``in_list`` lookup filter, which performs case sensitive
-	search for all values in ``values``, with an OR operator in between.
+	Handles the ``in_list`` lookup filter, which performs case insensitive
+	search on the queryset ``data``. The search returns the subset of the
+	queryset, for which every record's field ``field`` contains any of the
+	values in ``values``.
 
 	It should only be performed on fields that on Python level are represented
 	by lists (say a Django JSONField).                                     
@@ -149,18 +152,26 @@ def in_list_filter(data, definition, values):
 	field = definition[:-9]
 	query = Q()
 	for term in values:
-		query |= Q(**{'%s__contains' % field: term})
+		query |= Q(**{'%s__icontains' % field: term})
 	data = data.filter(query)
 
-	# Since I got rid of the biggest part of the queryset, I can now run the
-	# more specific query. Here I load the whole queryset into memory, so its
-	# vital that its as small as possible. That's why the previous step took
-	# place.							 
-	data = [instance for instance in data if set(values).intersection(
-		set(getattr(instance, field)))
-	]
+	# Convert all items of ``values`` to lowercase
+	values = [value.lower() for value in values]
+    
+	exclude = []
+	for instance in data:
+        # Exclude from the queryset all records for which the intersection of
+		# field ``field``, with the ``values`` list, is empty.
 
-	return data
+		# For every instance in ``data``, we retrieve the field ``field``,
+		# which should be a list. We turn the values all in lowercase.
+		value_list = getattr(instance, field)
+		value_list = [value.lower() for value in value_list]
+	
+		if not set(value_list).intersection(set(values)):
+			exclude.append(instance.id)
+
+	return data.exclude(id__in=exclude)
 
 # Maps custom lookups to their handler methods
 filter_to_method = {
