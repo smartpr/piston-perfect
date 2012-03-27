@@ -17,7 +17,7 @@ setup(
 		# happen we do it here instead. We are not sure about which Django
 		# versions we support, but we only tested 1.3 so that is what we
 		# require here.
-		"Django>=1.3-beta,<=1.3",
+		"Django==1.3.1",
 		# We need [revision `e539a104d516`](http://bitbucket.org/jespern/
 		# django-piston/src/e539a104d516/). Version `0.2.2` will fail,
 		# `0.2.3rc1` would not fail if it weren't for [changeset
