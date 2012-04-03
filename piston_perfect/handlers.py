@@ -482,9 +482,15 @@ class BaseHandler(handler.BaseHandler):
 		# a selection mechanism to influence the data that the requested
 		# operation should work with.
 		self.response_slice_data(response_structure, request, *args, **kwargs)
+
+		self.enrich_response(request, response_structure)
 		
 		return response_structure
 	
+	def enrich_response(self, request, response_structure):
+		pass		
+		
+
 	def create(self, request, *args, **kwargs):
 		"""
 		Default implementation of a create operation, put in place when the
