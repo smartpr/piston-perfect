@@ -712,7 +712,6 @@ class ModelHandler(BaseHandler):
 		  in this list.
 		
 		"""
-		
 		if isinstance(definition, basestring):
 			# If the definition's suffix is equal to the name of a custom
 			# lookup filter, call the corresponding method.
@@ -722,12 +721,19 @@ class ModelHandler(BaseHandler):
 			return data.filter(**{ definition: values })
 		
 		if isinstance(definition, (list, tuple, set)):
+			# definition: List of fields to filter based on
+			# values: list of terms to apply on each field for filtering.
+			# For every value, we apply an OR among all definitions
+			# We AND all partial queries generated for very value.
+
 			query = models.Q()
-			
-			for term in ' '.join(values).split():
+                        
+			for value in values:
+				partial_query = models.Q()
 				for field in definition:
-					query |= models.Q(**{ '%s__icontains' % field: term })
-			
+					partial_query = partial_query | models.Q(**{'%s__icontains' % field: value})
+				query = query & partial_query 
+
 			return data.filter(query)
 		
 		return data
