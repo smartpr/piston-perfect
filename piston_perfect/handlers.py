@@ -483,11 +483,11 @@ class BaseHandler(handler.BaseHandler):
 		# operation should work with.
 		self.response_slice_data(response_structure, request, *args, **kwargs)
 
-		self.enrich_response(request, response_structure)
+		self.enrich_response(request, response, response_structure)
 		
 		return response_structure
 	
-	def enrich_response(self, request, response_structure):
+	def enrich_response(self, request, all_data, response_structure):
 		pass		
 		
 
